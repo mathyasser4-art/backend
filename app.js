@@ -15,10 +15,9 @@ const cors = require('cors')
 const whitelist = [
   'https://practice-papers.com',
   'https://practicepapers.online',
+  'https://frontend-pearl-ten-60.vercel.app',
   'http://localhost:3000',
-  'http://localhost:3001',
-  // Add your Vercel deployment URLs here
-  // Example: 'https://your-app.vercel.app'
+  'http://localhost:3001'
 ];
 
 const corsOptions = {
