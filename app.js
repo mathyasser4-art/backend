@@ -10,18 +10,33 @@ if (isNaN(saltRounds) || saltRounds < 1) {
 }
 
 const cors = require('cors')
-// const whitelist = ['https://practice-papers.com', 'https://practicepapers.online'];
-// const corsOptions = {
-//   origin: function (origin, callback) {
-//     if (whitelist.indexOf(origin) !== -1) {
-//       callback(null, true)
-//     } else {
-//       callback(new Error('Not allowed by CORS'))
-//     }
-//   }
-// }
-// app.use(cors(corsOptions));
-app.use(cors());
+
+// CORS Configuration - Allow requests from frontend domains
+const whitelist = [
+  'https://practice-papers.com',
+  'https://practicepapers.online',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  // Add your Vercel deployment URLs here
+  // Example: 'https://your-app.vercel.app'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or same-origin)
+    if (!origin || whitelist.indexOf(origin) !== -1) {
+      callback(null, true)
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'auth-token']
+};
+
+app.use(cors(corsOptions));
 const port = process.env.PORT || 3000
 app.use(express.json())
 const connectionDB = require('./DB/connection')
