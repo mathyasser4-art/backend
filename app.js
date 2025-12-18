@@ -16,6 +16,7 @@ const whitelist = [
   'https://practice-papers.com',
   'https://practicepapers.online',
   'https://frontend-pearl-ten-60.vercel.app',
+  'https://abacus-2ntk.onrender.com',
   'http://localhost:3000',
   'http://localhost:3001'
 ];
