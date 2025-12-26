@@ -17,7 +17,6 @@ const whitelist = [
   'https://practicepapers.online',
   'https://frontend-pearl-ten-60.vercel.app',
   'https://abacus-2ntk.onrender.com',
-  'https://backend-production-6752.up.railway.app',
   'http://localhost:3000',
   'http://localhost:3001'
 ];
@@ -34,7 +33,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'auth-token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'auth-token', 'authrization']
 };
 
 app.use(cors(corsOptions));
@@ -64,6 +63,32 @@ const CronJob = require('cron').CronJob;
 //         }
 //     })
 // }, null, true, 'America/New_York')
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+    const mongoose = require('mongoose');
+    const dbState = mongoose.connection.readyState;
+    const states = {
+        0: 'disconnected',
+        1: 'connected',
+        2: 'connecting',
+        3: 'disconnecting'
+    };
+    
+    if (dbState === 1) {
+        res.status(200).json({ 
+            status: 'healthy', 
+            database: states[dbState],
+            timestamp: new Date().toISOString()
+        });
+    } else {
+        res.status(503).json({ 
+            status: 'unhealthy', 
+            database: states[dbState],
+            timestamp: new Date().toISOString()
+        });
+    }
+});
 
 app.get('/', (req, res) => res.send('Hello World!'))
 app.listen(port, () => console.log(`Example app listening on port ${port}!`))
