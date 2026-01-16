@@ -2,6 +2,7 @@ const questionModel = require('../../../../DB/models/question.model')
 const answerModel = require('../../../../DB/models/answer.model')
 const assignmentModel = require('../../../../DB/models/assignment.model')
 const checkAnswer = require('../../../services/checkAnswer')
+const normalizeAnswer = require('../../../services/normalizeAnswer')
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
@@ -28,7 +29,7 @@ const getResult = async (req, res) => {
             const assignment = await assignmentModel.findById(assignmentID)
                 .populate({
                     path: 'questions',
-                    select: 'questionPoints correctAnswer typeOfAnswer answer autoCorrect'
+                    select: 'questionPoints correctAnswer typeOfAnswer answer correctPicAnswer autoCorrect'
                 });
 
             let totalSummation = 0;
@@ -47,23 +48,57 @@ const getResult = async (req, res) => {
                         
                         // Auto-grade all question types using the same logic as checkAnswer service
                         if (question.typeOfAnswer === 'MCQ') {
-                            // MCQ: Compare with correctAnswer using loose equality
-                            if (studentAnswerForQuestion.firstAnswer && 
-                                question.correctAnswer == studentAnswerForQuestion.firstAnswer) {
-                                isCorrect = true;
+                            // MCQ: Normalize and compare answers
+                            // FIX: Check for undefined/null instead of falsy to handle "0" answers
+                            if (studentAnswerForQuestion.firstAnswer !== undefined && 
+                                studentAnswerForQuestion.firstAnswer !== null) {
+                                
+                                const normalizedStudentAnswer = normalizeAnswer(studentAnswerForQuestion.firstAnswer);
+                                const normalizedCorrectAnswer = normalizeAnswer(question.correctAnswer);
+                                
+                                console.log('MCQ Comparison:');
+                                console.log('  Student answer (raw):', studentAnswerForQuestion.firstAnswer);
+                                console.log('  Student answer (normalized):', normalizedStudentAnswer);
+                                console.log('  Correct answer (raw):', question.correctAnswer);
+                                console.log('  Correct answer (normalized):', normalizedCorrectAnswer);
+                                
+                                isCorrect = normalizedCorrectAnswer === normalizedStudentAnswer;
                             }
                         } else if (question.typeOfAnswer === 'Essay') {
-                            // Essay: Check if answer is in the answer array
-                            if (studentAnswerForQuestion.firstAnswer && 
+                            // Essay: Normalize and check if answer is in the answer array (case-insensitive)
+                            // FIX: Check for undefined/null instead of falsy to handle "0" or "" answers
+                            if (studentAnswerForQuestion.firstAnswer !== undefined && 
+                                studentAnswerForQuestion.firstAnswer !== null && 
                                 question.answer && question.answer.length > 0) {
-                                isCorrect = question.answer.includes(studentAnswerForQuestion.firstAnswer);
+                                
+                                const normalizedStudentAnswer = normalizeAnswer(studentAnswerForQuestion.firstAnswer, { toLowerCase: true });
+                                
+                                console.log('Essay Comparison:');
+                                console.log('  Student answer (raw):', studentAnswerForQuestion.firstAnswer);
+                                console.log('  Student answer (normalized):', normalizedStudentAnswer);
+                                console.log('  Correct answers (raw):', question.answer);
+                                
+                                // Check if normalized student answer matches any normalized correct answer
+                                isCorrect = question.answer.some(correctAns => {
+                                    const normalizedCorrectAnswer = normalizeAnswer(correctAns, { toLowerCase: true });
+                                    console.log('    Checking against:', correctAns, '→', normalizedCorrectAnswer);
+                                    return normalizedCorrectAnswer === normalizedStudentAnswer;
+                                });
                             }
                         } else if (question.typeOfAnswer === 'Graph') {
                             // Graph: Compare uploaded image URL with correctPicAnswer
                             if (studentAnswerForQuestion.stepPicture && 
                                 studentAnswerForQuestion.stepPicture.secure_url && 
                                 question.correctPicAnswer) {
-                                isCorrect = studentAnswerForQuestion.stepPicture.secure_url == question.correctPicAnswer;
+                                
+                                const normalizedStudentAnswer = normalizeAnswer(studentAnswerForQuestion.stepPicture.secure_url);
+                                const normalizedCorrectAnswer = normalizeAnswer(question.correctPicAnswer);
+                                
+                                console.log('Graph Comparison:');
+                                console.log('  Student image:', normalizedStudentAnswer);
+                                console.log('  Correct image:', normalizedCorrectAnswer);
+                                
+                                isCorrect = normalizedCorrectAnswer === normalizedStudentAnswer;
                             }
                         }
                         
@@ -161,7 +196,8 @@ const checkAssinmentAnswer = async (req, res) => {
 
         // Determine the answer to save and check
         // questionAnswer is sent from frontend at exam end, firstAnswer is sent during quiz
-        const answerToSave = questionAnswer || firstAnswer;
+        // FIX: Use proper null/undefined check to handle "0" answers
+        const answerToSave = (questionAnswer !== undefined && questionAnswer !== null) ? questionAnswer : firstAnswer;
         let answerToCheck;
         
         if (question.typeOfAnswer === 'Graph' && req.file) {
@@ -187,10 +223,19 @@ const checkAssinmentAnswer = async (req, res) => {
         if (questionIndex > -1) {
             // Update existing answer
             if (question.typeOfAnswer !== 'Graph' || !req.file) {
-                findAnswer.questions[questionIndex].firstAnswer = answerToSave || findAnswer.questions[questionIndex].firstAnswer;
-                findAnswer.questions[questionIndex].secondAnswer = secondAnswer || findAnswer.questions[questionIndex].secondAnswer;
-                findAnswer.questions[questionIndex].thirdAnswer = thirdAnswer || findAnswer.questions[questionIndex].thirdAnswer;
-                findAnswer.questions[questionIndex].fourthAnswer = fourthAnswer || findAnswer.questions[questionIndex].fourthAnswer;
+                // FIX: Use !== undefined and !== null to properly handle falsy values like 0 and ""
+                if (answerToSave !== undefined && answerToSave !== null) {
+                    findAnswer.questions[questionIndex].firstAnswer = answerToSave;
+                }
+                if (secondAnswer !== undefined && secondAnswer !== null) {
+                    findAnswer.questions[questionIndex].secondAnswer = secondAnswer;
+                }
+                if (thirdAnswer !== undefined && thirdAnswer !== null) {
+                    findAnswer.questions[questionIndex].thirdAnswer = thirdAnswer;
+                }
+                if (fourthAnswer !== undefined && fourthAnswer !== null) {
+                    findAnswer.questions[questionIndex].fourthAnswer = fourthAnswer;
+                }
             }
             findAnswer.questions[questionIndex].isCorrect = isCorrect;
             findAnswer.questions[questionIndex].point = isCorrect ? question.questionPoints : 0;
@@ -349,7 +394,8 @@ const correctAnswer = async (req, res) => {
         // Recalculate total
         let newTotal = 0;
         findAnswer.questions.forEach(q => {
-            if (q.point) {
+            // FIX: Check for undefined/null instead of truthy to handle 0 points correctly
+            if (q.point !== undefined && q.point !== null) {
                 newTotal += q.point;
             }
         });
