@@ -32,6 +32,34 @@ const getResult = async (req, res) => {
                     select: 'questionPoints correctAnswer typeOfAnswer answer correctPicAnswer autoCorrect'
                 });
 
+            console.log('=== ASSIGNMENT RETRIEVED ===');
+            console.log('Assignment exists:', !!assignment);
+            console.log('Assignment questions count:', assignment?.questions?.length || 0);
+            
+            if (assignment && assignment.questions) {
+                console.log('=== QUESTIONS IN ASSIGNMENT ===');
+                assignment.questions.forEach((q, idx) => {
+                    console.log(`Question ${idx + 1}:`, {
+                        id: q._id,
+                        type: q.typeOfAnswer,
+                        points: q.questionPoints,
+                        correctAnswer: q.correctAnswer,
+                        answerArray: q.answer,
+                        correctPicAnswer: q.correctPicAnswer
+                    });
+                });
+            }
+
+            console.log('=== STUDENT ANSWERS ===');
+            console.log('Total student answers:', findAnswer.questions.length);
+            findAnswer.questions.forEach((ans, idx) => {
+                console.log(`Student answer ${idx + 1}:`, {
+                    questionId: ans.question,
+                    firstAnswer: ans.firstAnswer,
+                    secondAnswer: ans.secondAnswer
+                });
+            });
+
             let totalSummation = 0;
             let studentTotalScore = 0;
 
@@ -43,15 +71,34 @@ const getResult = async (req, res) => {
                         (ans) => ans.question.toString() === question._id.toString()
                     );
 
+                    console.log(`\n=== CHECKING QUESTION ${question._id} ===`);
+                    console.log('Question type:', question.typeOfAnswer);
+                    console.log('Student answered this question:', !!studentAnswerForQuestion);
+                    
                     if (studentAnswerForQuestion) {
+                        console.log('Student answer found:', {
+                            firstAnswer: studentAnswerForQuestion.firstAnswer,
+                            type: typeof studentAnswerForQuestion.firstAnswer
+                        });
+                        console.log('Correct answer from DB:', {
+                            correctAnswer: question.correctAnswer,
+                            answerArray: question.answer,
+                            correctPicAnswer: question.correctPicAnswer
+                        });
                         let isCorrect = false;
                         
                         // Auto-grade all question types using the same logic as checkAnswer service
                         if (question.typeOfAnswer === 'MCQ') {
+                            console.log('>>> Processing MCQ question');
+                            
                             // MCQ: Normalize and compare answers
                             // FIX: Check for undefined/null instead of falsy to handle "0" answers
                             if (studentAnswerForQuestion.firstAnswer !== undefined && 
                                 studentAnswerForQuestion.firstAnswer !== null) {
+                                
+                                console.log('>>> Student has an answer, checking correctAnswer field...');
+                                console.log('>>> question.correctAnswer exists?', question.correctAnswer !== undefined && question.correctAnswer !== null);
+                                console.log('>>> question.correctAnswer value:', question.correctAnswer);
                                 
                                 const normalizedStudentAnswer = normalizeAnswer(studentAnswerForQuestion.firstAnswer);
                                 const normalizedCorrectAnswer = normalizeAnswer(question.correctAnswer);
@@ -61,10 +108,18 @@ const getResult = async (req, res) => {
                                 console.log('  Student answer (normalized):', normalizedStudentAnswer);
                                 console.log('  Correct answer (raw):', question.correctAnswer);
                                 console.log('  Correct answer (normalized):', normalizedCorrectAnswer);
+                                console.log('  Match:', normalizedCorrectAnswer === normalizedStudentAnswer);
                                 
                                 isCorrect = normalizedCorrectAnswer === normalizedStudentAnswer;
+                            } else {
+                                console.log('>>> Student answer is undefined/null');
                             }
                         } else if (question.typeOfAnswer === 'Essay') {
+                            console.log('>>> Processing Essay question');
+                            console.log('>>> question.answer array exists?', question.answer !== undefined && question.answer !== null);
+                            console.log('>>> question.answer array length:', question.answer?.length || 0);
+                            console.log('>>> question.answer content:', question.answer);
+                            
                             // Essay: Normalize and check if answer is in the answer array (case-insensitive)
                             // FIX: Check for undefined/null instead of falsy to handle "0" or "" answers
                             if (studentAnswerForQuestion.firstAnswer !== undefined && 
@@ -84,6 +139,8 @@ const getResult = async (req, res) => {
                                     console.log('    Checking against:', correctAns, '→', normalizedCorrectAnswer);
                                     return normalizedCorrectAnswer === normalizedStudentAnswer;
                                 });
+                            } else {
+                                console.log('>>> Cannot check - student answer or correct answer array missing');
                             }
                         } else if (question.typeOfAnswer === 'Graph') {
                             // Graph: Compare uploaded image URL with correctPicAnswer
@@ -103,6 +160,9 @@ const getResult = async (req, res) => {
                         }
                         
                         // Assign points based on correctness
+                        console.log('>>> isCorrect:', isCorrect);
+                        console.log('>>> Points to award:', isCorrect ? question.questionPoints : 0);
+                        
                         if (isCorrect) {
                             studentTotalScore += question.questionPoints;
                             studentAnswerForQuestion.point = question.questionPoints;
@@ -110,6 +170,10 @@ const getResult = async (req, res) => {
                             studentAnswerForQuestion.point = 0;
                         }
                         studentAnswerForQuestion.isCorrect = isCorrect;
+                        
+                        console.log('>>> Running total score:', studentTotalScore);
+                    } else {
+                        console.log('>>> Student did NOT answer this question');
                     }
                 });
             }
