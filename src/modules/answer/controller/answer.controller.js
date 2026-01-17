@@ -19,7 +19,16 @@ const getResult = async (req, res) => {
         console.log('getResult - Assignment ID:', assignmentID);
         console.log('getResult - Student ID:', studentID);
 
+        // #region agent log
+        const mongoose = require('mongoose');
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:22',message:'getResult - query attempt',data:{studentID:studentID?.toString(),studentIDType:typeof studentID,assignmentID:assignmentID,assignmentIDType:typeof assignmentID,isValidObjectId_studentID:mongoose.Types.ObjectId.isValid(studentID),isValidObjectId_assignmentID:mongoose.Types.ObjectId.isValid(assignmentID)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'GET_RESULT_QUERY'})}).catch(()=>{});
+        // #endregion
+
         const findAnswer = await answerModel.findOne({ solveBy: studentID, assignment: assignmentID });
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:24',message:'getResult - query result',data:{foundAnswer:!!findAnswer,answerDocId:findAnswer?._id?.toString(),questionsCount:findAnswer?.questions?.length || 0,solveByInDoc:findAnswer?.solveBy?.toString(),assignmentInDoc:findAnswer?.assignment?.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'GET_RESULT_QUERY'})}).catch(()=>{});
+        // #endregion
 
         if (findAnswer) {
             console.log('getResult - Previous time in DB:', findAnswer.time);
@@ -180,11 +189,14 @@ const getResult = async (req, res) => {
 
             findAnswer.total = studentTotalScore;
 
-            const findIndex = assignment.students?.findIndex(object => String(object.solveBy) == String(studentID));
-            if (findIndex !== -1) {
-                assignment.students[findIndex].attempts = assignment.attemptsNumber;
-                await assignment.save();
-            }
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:181',message:'Final score calculated',data:{studentTotalScore:studentTotalScore,totalSummation:totalSummation,assignmentId:assignmentID,studentId:studentID,questionsAnswered:findAnswer.questions.length,totalQuestions:assignment?.questions?.length || 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'GET_RESULT'})}).catch(()=>{});
+            // #endregion
+
+            // FIX: Don't modify attempts when getting result
+            // Attempts are incremented when student OPENS the assignment (in getAssignmentDetails)
+            // Not when they finish it. The old code was setting attempts = attemptsNumber,
+            // which incorrectly marked the assignment as "completed" immediately after first submission
 
             await findAnswer.save();
 
@@ -219,6 +231,11 @@ const checkAssinmentAnswer = async (req, res) => {
     try {
         const { questionID, assignmentID } = req.params;
         const studentID = req.userData._id;
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:233',message:'checkAssinmentAnswer - request body received',data:{reqBodyType:typeof req.body,reqBodyKeys:Object.keys(req.body || {}),hasFirstAnswer:!!req.body?.firstAnswer,hasQuestionAnswer:!!req.body?.questionAnswer,firstAnswerValue:req.body?.firstAnswer,questionAnswerValue:req.body?.questionAnswer,firstAnswerType:typeof req.body?.firstAnswer,questionAnswerType:typeof req.body?.questionAnswer},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'FORM_DATA_PARSE'})}).catch(()=>{});
+        // #endregion
+        
         const { firstAnswer, secondAnswer, thirdAnswer, fourthAnswer, questionAnswer } = req.body;
 
         console.log('=== checkAssinmentAnswer START ===');
@@ -262,6 +279,10 @@ const checkAssinmentAnswer = async (req, res) => {
         // questionAnswer is sent from frontend at exam end, firstAnswer is sent during quiz
         // FIX: Use proper null/undefined check to handle "0" answers
         const answerToSave = (questionAnswer !== undefined && questionAnswer !== null) ? questionAnswer : firstAnswer;
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:278',message:'checkAssinmentAnswer - answerToSave determined',data:{questionAnswer:questionAnswer,firstAnswer:firstAnswer,answerToSave:answerToSave,answerToSaveType:typeof answerToSave,answerToSaveLength:answerToSave?.length,willSave:answerToSave !== undefined && answerToSave !== null && answerToSave !== ''},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ANSWER_TO_SAVE'})}).catch(()=>{});
+        // #endregion
         let answerToCheck;
         
         if (question.typeOfAnswer === 'Graph' && req.file) {
@@ -278,6 +299,10 @@ const checkAssinmentAnswer = async (req, res) => {
 
         // Check if the answer is correct using the checkAnswer service
         const isCorrect = checkAnswer(question, answerToCheck);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:280',message:'Answer check result',data:{questionId:questionID,questionType:question.typeOfAnswer,answerToCheck:answerToCheck,correctAnswer:question.correctAnswer,answerArray:question.answer,isCorrect:isCorrect,points:question.questionPoints},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CHECK_ANSWER'})}).catch(()=>{});
+        // #endregion
         
         console.log('checkAssinmentAnswer - Question:', questionID);
         console.log('checkAssinmentAnswer - Answer to check:', answerToCheck);
@@ -305,12 +330,13 @@ const checkAssinmentAnswer = async (req, res) => {
             findAnswer.questions[questionIndex].point = isCorrect ? question.questionPoints : 0;
         } else {
             // Add new question answer
+            // FIX: Only save answer if it's not undefined/null/empty to avoid marking as "not answered"
             const newQuestionAnswer = {
                 question: questionID,
-                firstAnswer: answerToSave,
-                secondAnswer: secondAnswer || '',
-                thirdAnswer: thirdAnswer || '',
-                fourthAnswer: fourthAnswer || '',
+                firstAnswer: (answerToSave !== undefined && answerToSave !== null && answerToSave !== '') ? answerToSave : undefined,
+                secondAnswer: (secondAnswer !== undefined && secondAnswer !== null && secondAnswer !== '') ? secondAnswer : undefined,
+                thirdAnswer: (thirdAnswer !== undefined && thirdAnswer !== null && thirdAnswer !== '') ? thirdAnswer : undefined,
+                fourthAnswer: (fourthAnswer !== undefined && fourthAnswer !== null && fourthAnswer !== '') ? fourthAnswer : undefined,
                 attempts: 1,
                 isCorrect: isCorrect,
                 point: isCorrect ? question.questionPoints : 0
@@ -324,6 +350,15 @@ const checkAssinmentAnswer = async (req, res) => {
         }
 
         await findAnswer.save();
+
+        // #region agent log
+        const savedDoc = await answerModel.findById(findAnswer._id);
+        const lastQuestionIndex = findAnswer.questions.length - 1;
+        const lastQuestion = lastQuestionIndex >= 0 ? findAnswer.questions[lastQuestionIndex] : null;
+        const questionIndexToCheck = questionIndex > -1 ? questionIndex : lastQuestionIndex;
+        const savedQuestion = questionIndexToCheck >= 0 ? findAnswer.questions[questionIndexToCheck] : null;
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:356',message:'Answer saved - verification query',data:{answerDocId:findAnswer._id?.toString(),questionsCount:savedDoc?.questions?.length || 0,questionIndex:questionIndex,lastQuestionIndex:lastQuestionIndex,savedQuestionFirstAnswer:savedQuestion?.firstAnswer,savedQuestionFirstAnswerType:typeof savedQuestion?.firstAnswer,savedQuestionFirstAnswerLength:savedQuestion?.firstAnswer?.length,answerToSave:answerToSave,answerToSaveType:typeof answerToSave},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'SAVE_VERIFY'})}).catch(()=>{});
+        // #endregion
 
         console.log('Answer saved successfully');
         console.log('Total questions in answer document:', findAnswer.questions.length);
@@ -350,12 +385,22 @@ const checkAssinmentAnswer = async (req, res) => {
 const getAssignmentAnswer = async (req, res) => {
     try {
         const { studentID, assignmentID } = req.params;
+        const mongoose = require('mongoose');
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:358',message:'getAssignmentAnswer called',data:{studentID:studentID,studentIDType:typeof studentID,assignmentID:assignmentID,assignmentIDType:typeof assignmentID,isValidObjectId_studentID:mongoose.Types.ObjectId.isValid(studentID),isValidObjectId_assignmentID:mongoose.Types.ObjectId.isValid(assignmentID)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'TEACHER_VIEW'})}).catch(()=>{});
+        // #endregion
 
         console.log('=== getAssignmentAnswer START ===');
         console.log('Student ID:', studentID);
         console.log('Assignment ID:', assignmentID);
 
         // Find the student's answers for this assignment
+        // #region agent log
+        const query = { solveBy: studentID, assignment: assignmentID };
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:368',message:'Query attempt - before findOne',data:{querySolveBy:query.solveBy,queryAssignment:query.assignment,querySolveByType:typeof query.solveBy,queryAssignmentType:typeof query.assignment},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'TEACHER_VIEW'})}).catch(()=>{});
+        // #endregion
+
         const answers = await answerModel.findOne({ 
             solveBy: studentID, 
             assignment: assignmentID 
@@ -389,6 +434,10 @@ const getAssignmentAnswer = async (req, res) => {
             questions: answers.questions.map(studentAnswer => {
                 const question = questions.find(q => q._id.toString() === studentAnswer.question.toString());
                 
+                // FIX: Check for undefined/null/empty string properly - empty string means "no answer"
+                const hasFirstAnswer = studentAnswer.firstAnswer !== undefined && studentAnswer.firstAnswer !== null && studentAnswer.firstAnswer !== '';
+                const hasSecondAnswer = studentAnswer.secondAnswer !== undefined && studentAnswer.secondAnswer !== null && studentAnswer.secondAnswer !== '';
+                
                 return {
                     _id: studentAnswer._id,
                     question: question?.question || '',
@@ -397,7 +446,7 @@ const getAssignmentAnswer = async (req, res) => {
                     secondAnswer: studentAnswer.secondAnswer || '',
                     stepsPic: studentAnswer.stepPicture?.secure_url || null,
                     isCorrect: studentAnswer.isCorrect || false,
-                    notAnswer: !studentAnswer.firstAnswer && !studentAnswer.secondAnswer,
+                    notAnswer: !hasFirstAnswer && !hasSecondAnswer,
                     questionPoints: question?.questionPoints || 0,
                     point: studentAnswer.point || 0
                 };
@@ -508,6 +557,10 @@ const getStudentOwnReport = async (req, res) => {
             questions: answers.questions.map(studentAnswer => {
                 const question = questions.find(q => q._id.toString() === studentAnswer.question.toString());
                 
+                // FIX: Check for undefined/null/empty string properly - empty string means "no answer"
+                const hasFirstAnswer = studentAnswer.firstAnswer !== undefined && studentAnswer.firstAnswer !== null && studentAnswer.firstAnswer !== '';
+                const hasSecondAnswer = studentAnswer.secondAnswer !== undefined && studentAnswer.secondAnswer !== null && studentAnswer.secondAnswer !== '';
+                
                 return {
                     _id: studentAnswer._id,
                     question: question?.question || '',
@@ -516,7 +569,7 @@ const getStudentOwnReport = async (req, res) => {
                     secondAnswer: studentAnswer.secondAnswer || '',
                     stepsPic: studentAnswer.stepPicture?.secure_url || null,
                     isCorrect: studentAnswer.isCorrect || false,
-                    notAnswer: !studentAnswer.firstAnswer && !studentAnswer.secondAnswer,
+                    notAnswer: !hasFirstAnswer && !hasSecondAnswer,
                     questionPoints: question?.questionPoints || 0,
                     point: studentAnswer.point || 0
                 };
