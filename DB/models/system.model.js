@@ -9,6 +9,10 @@ const systemSchema = new mongoose.Schema({
         type: [mongoose.Schema.Types.ObjectId],
         ref: "subject"
     },
+    questionTypeID: {
+        type: String,
+        default: null
+    },
 })
 
 const systemModel = mongoose.model('system', systemSchema)

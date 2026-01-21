@@ -13,7 +13,15 @@ const addSystem = async (req, res) => {
 
 const getAllSystem = async (req, res) => {
     try {
-        const allSystem = await systemModel.find().populate('subjects')
+        const { questionTypeID } = req.params
+        let query = {}
+        
+        // If questionTypeID is provided, filter by it
+        if (questionTypeID) {
+            query.questionTypeID = questionTypeID
+        }
+        
+        const allSystem = await systemModel.find(query).populate('subjects')
         if (allSystem.length != 0) {
             res.json({ message: "success", allSystem })
         } else {

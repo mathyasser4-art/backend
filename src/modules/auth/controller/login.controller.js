@@ -7,7 +7,13 @@ const jwt = require('jsonwebtoken');
 const login = async (req, res) => {
     try {
         const { email, password } = req.body
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth/controller/login.controller.js:8',message:'Login attempt started',data:{email:email,hasPassword:!!password},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN'})}).catch(()=>{});
+        // #endregion
         const findUser = await userModel.findOne({ $or: [{ 'email': email }, { 'userName': email }] })
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth/controller/login.controller.js:11',message:'User lookup result',data:{userFound:!!findUser,userId:findUser?._id?.toString(),userName:findUser?.userName,role:findUser?.role,isVerified:findUser?.verify},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN'})}).catch(()=>{});
+        // #endregion
         if (findUser) {
             if (!findUser.verify) {
                 findUser.verificationCode = generateCode()
@@ -20,8 +26,14 @@ const login = async (req, res) => {
                 res.json({ message: 'this account is not verify check your email to get your code verification', isVerify: false })
             } else {
                 const checkPassword = await bcrypt.compare(password, findUser.password)
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth/controller/login.controller.js:23',message:'Password check result',data:{passwordMatch:checkPassword},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN'})}).catch(()=>{});
+                // #endregion
                 if (checkPassword) {
                     const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth/controller/login.controller.js:25',message:'Login successful',data:{userId:findUser._id?.toString(),userName:findUser.userName,role:findUser.role,hasToken:!!userToken},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN'})}).catch(()=>{});
+                    // #endregion
                     res.json({ message: 'success', userToken, userName: findUser.userName, role: findUser.role })
                 } else {
                     res.json({ message: 'wrong password' })

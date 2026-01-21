@@ -105,9 +105,18 @@ const getStudentResults = async (req, res) => {
         }
 
         // Get all answers for this assignment with student information
+        // #region agent log
+        const mongoose = require('mongoose');
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assignment/controller/assignment.controller.js:107',message:'getStudentResults - query attempt',data:{assignmentID:assignmentID,assignmentIDType:typeof assignmentID,isValidObjectId:mongoose.Types.ObjectId.isValid(assignmentID)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STUDENT_RESULTS'})}).catch(()=>{});
+        // #endregion
+        
         const answers = await answerModel.find({ assignment: assignmentID })
             .populate('solveBy', 'name email')
             .select('total questionsNumber time createdAt questions');
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assignment/controller/assignment.controller.js:111',message:'getStudentResults - query result',data:{answersFound:answers?.length || 0,answersWithQuestions:answers?.filter(a => a.questions?.length > 0).length || 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STUDENT_RESULTS'})}).catch(()=>{});
+        // #endregion
 
         // Calculate total points from assignment questions
         let totalPoints = 0;
