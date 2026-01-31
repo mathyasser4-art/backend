@@ -1,7 +1,6 @@
 const userModel = require('../../../../DB/models/user.model')
-const sendEmail = require('../../../services/sendEmail')
-const generateCode = require('../../../services/generateVerificationCode')
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const register = async (req, res) => {
     try {
@@ -11,16 +10,18 @@ const register = async (req, res) => {
             if (password == cPassword) {
                 const hashPassword = await bcrypt.hash(password, parseInt(process.env.SALTROUNDS))
                 req.body.password = hashPassword
-                req.body.verificationCode = generateCode()
+                req.body.verify = true // Auto-verify new users - no email verification needed
                 const addUser = new userModel(req.body)
                 const userData = await addUser.save()
                 if (userData) {
-                    const emailMessage = `<div style="direction: rtl; padding: 10px 30px;">
-                    <p style="font-size: 20px; font-weight: bold; color: #000;">Welcome, ${userData.userName}. We are happy that you have registered with us. Your account verification code is</p>
-                    <p style="font-size: 40px; font-weight: bold; color: #000;">${userData.verificationCode}</p>
-                    </div>`                    
-                    sendEmail(email, emailMessage, 'Account verification', 'Practice Papers')
-                    res.status(201).json({ message: 'success' })
+                    // Generate token for immediate login
+                    const userToken = jwt.sign({ id: userData._id }, process.env.TOKEN_SECRET_KEY);
+                    res.status(201).json({ 
+                        message: 'success',
+                        userToken,
+                        userName: userData.userName,
+                        role: userData.role
+                    })
                 } else {
                     res.json({ message: 'Error...This account has not been registered to our servers. Please try again' })
                 }
