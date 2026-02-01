@@ -111,7 +111,7 @@ const getStudentResults = async (req, res) => {
         // #endregion
         
         const answers = await answerModel.find({ assignment: assignmentID })
-            .populate('solveBy', 'name email')
+            .populate('solveBy', 'userName email')
             .select('total questionsNumber time createdAt questions');
         
         // #region agent log
@@ -131,7 +131,7 @@ const getStudentResults = async (req, res) => {
             return {
                 _id: answer._id,
                 studentId: answer.solveBy._id,
-                name: answer.solveBy.name,
+                userName: answer.solveBy.userName,
                 email: answer.solveBy.email,
                 answeredQuestions: answer.questionsNumber,
                 score: answer.total,
