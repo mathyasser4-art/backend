@@ -265,7 +265,7 @@ const getStudentHistory = async (req, res) => {
                     userName: student.userName,
                     email: student.email
                 },
-                history: [],
+                assignments: [],
                 statistics: {
                     totalAssignments: 0,
                     averageScore: 0,
@@ -286,8 +286,8 @@ const getStudentHistory = async (req, res) => {
         const highestScore = Math.max(...scores)
         const lowestScore = Math.min(...scores)
 
-        // Format history data
-        const history = validAnswers.map(answer => {
+        // Format assignments data
+        const assignments = validAnswers.map(answer => {
             const percentage = (answer.total / answer.assignment.totalPoints) * 100
             let grade = 'F'
             if (percentage >= 90) grade = 'A'
@@ -300,11 +300,13 @@ const getStudentHistory = async (req, res) => {
                 assignmentID: answer.assignment._id,
                 assignmentTitle: answer.assignment.title,
                 score: answer.total,
-                totalPoints: answer.assignment.totalPoints,
+                totalPossible: answer.assignment.totalPoints,
                 percentage: Math.round(percentage * 100) / 100,
                 grade: grade,
-                completedAt: answer.assignment.createdAt,
-                questionsNumber: answer.questionsNumber
+                completedAt: answer.createdAt || answer.updatedAt || answer.assignment.createdAt,
+                totalQuestions: answer.questionsNumber || 0,
+                answeredQuestions: answer.questionsNumber || 0,
+                timeSpent: answer.timeSpent || '0:00'
             }
         })
 
@@ -315,7 +317,7 @@ const getStudentHistory = async (req, res) => {
                 userName: student.userName,
                 email: student.email
             },
-            history: history,
+            assignments: assignments,
             statistics: {
                 totalAssignments: totalAssignments,
                 averageScore: Math.round(averageScore * 100) / 100,
