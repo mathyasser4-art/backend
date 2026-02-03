@@ -1,5 +1,5 @@
 const teacherRouter = require('express').Router()
-const { addTeacher, getTeachers, updateTeacher, deleteTeacher, addTeacherToClass, search, getTeacherToClass, removeTeacherFromClass, getTeacherClass, getAllAssignment } = require('./controller/teacher.controller')
+const { addTeacher, getTeachers, updateTeacher, deleteTeacher, addTeacherToClass, search, getTeacherToClass, removeTeacherFromClass, getTeacherClass, getAllAssignment, getStudentHistory } = require('./controller/teacher.controller')
 const { itAuth, teacherAuth } = require('../../middleware/auth')
 
 teacherRouter.post('/teacher/addTeacher/:pageNumber', itAuth, addTeacher)
@@ -12,5 +12,6 @@ teacherRouter.get('/teacher/getTeacherToClass', itAuth, getTeacherToClass)
 teacherRouter.put('/teacher/removeTeacherFromClass/:teacherID/:classID', itAuth, removeTeacherFromClass)
 teacherRouter.get('/teacher/getClass', teacherAuth, getTeacherClass)
 teacherRouter.get('/teacher/getAssignment', teacherAuth, getAllAssignment)
+teacherRouter.get('/teacher/student/:studentID/history', teacherAuth, getStudentHistory)
 
 module.exports = teacherRouter

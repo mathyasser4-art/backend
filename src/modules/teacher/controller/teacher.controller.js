@@ -234,4 +234,100 @@ const getAllAssignment = async (req, res) => {
     }
 }
 
-module.exports = { addTeacher, getTeachers, updateTeacher, deleteTeacher, addTeacherToClass, search, getTeacherToClass, removeTeacherFromClass, getTeacherClass, getAllAssignment }
+const getStudentHistory = async (req, res) => {
+    try {
+        const { studentID } = req.params
+        const teacherID = req.userData._id
+
+        // Find the student
+        const student = await userModel.findById(studentID).select('userName email')
+        if (!student) {
+            return res.status(404).json({ message: 'Student not found' })
+        }
+
+        // Find all answers by this student for assignments created by this teacher
+        const studentAnswers = await answerModel.find({ solveBy: studentID })
+            .populate({
+                path: 'assignment',
+                match: { createdBy: teacherID },
+                select: 'title totalPoints createdAt startDate endDate'
+            })
+            .sort({ _id: -1 })
+
+        // Filter out answers where assignment is null (not created by this teacher)
+        const validAnswers = studentAnswers.filter(answer => answer.assignment !== null)
+
+        if (validAnswers.length === 0) {
+            return res.json({
+                message: 'success',
+                student: {
+                    _id: student._id,
+                    userName: student.userName,
+                    email: student.email
+                },
+                assignments: [],
+                statistics: {
+                    totalAssignments: 0,
+                    averageScore: 0,
+                    highestScore: 0,
+                    lowestScore: 0
+                }
+            })
+        }
+
+        // Calculate statistics
+        const scores = validAnswers.map(answer => {
+            const percentage = (answer.total / answer.assignment.totalPoints) * 100
+            return percentage
+        })
+
+        const totalAssignments = validAnswers.length
+        const averageScore = scores.reduce((acc, score) => acc + score, 0) / totalAssignments
+        const highestScore = Math.max(...scores)
+        const lowestScore = Math.min(...scores)
+
+        // Format assignments data
+        const assignments = validAnswers.map(answer => {
+            const percentage = (answer.total / answer.assignment.totalPoints) * 100
+            let grade = 'F'
+            if (percentage >= 90) grade = 'A'
+            else if (percentage >= 80) grade = 'B'
+            else if (percentage >= 70) grade = 'C'
+            else if (percentage >= 60) grade = 'D'
+
+            return {
+                _id: answer._id,
+                assignmentID: answer.assignment._id,
+                assignmentTitle: answer.assignment.title,
+                score: answer.total,
+                totalPossible: answer.assignment.totalPoints,
+                percentage: Math.round(percentage * 100) / 100,
+                grade: grade,
+                completedAt: answer.createdAt || answer.updatedAt || answer.assignment.createdAt,
+                totalQuestions: answer.questionsNumber || 0,
+                answeredQuestions: answer.questionsNumber || 0,
+                timeSpent: answer.timeSpent || '0:00'
+            }
+        })
+
+        res.json({
+            message: 'success',
+            student: {
+                _id: student._id,
+                userName: student.userName,
+                email: student.email
+            },
+            assignments: assignments,
+            statistics: {
+                totalAssignments: totalAssignments,
+                averageScore: Math.round(averageScore * 100) / 100,
+                highestScore: Math.round(highestScore * 100) / 100,
+                lowestScore: Math.round(lowestScore * 100) / 100
+            }
+        })
+    } catch (error) {
+        res.status(502).json({ message: error.message })
+    }
+}
+
+module.exports = { addTeacher, getTeachers, updateTeacher, deleteTeacher, addTeacherToClass, search, getTeacherToClass, removeTeacherFromClass, getTeacherClass, getAllAssignment, getStudentHistory }
