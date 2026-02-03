@@ -57,28 +57,11 @@ const updateAssignment = async (req, res) => {
 const deleteAssignment = async (req, res) => {
     try {
         const teacherID = req.userData._id
-        let { assignmentID } = req.params
-        const findAssignment = await assignmentModel.findById(assignmentID)
-        if (findAssignment) {
-            const deleteAssignment = await assignmentModel.findByIdAndDelete(assignmentID)
-            if (deleteAssignment) {
-                assignmentID = new mongoose.Types.ObjectId(assignmentID)
-                const findAnswer = await answerModel.find({ assignment: assignmentID })
-                for (let index = 0; index < findAnswer.length; index++) {
-                    const element = findAnswer[index];
-                    for (let index = 0; index < element.questions.length; index++) {
-                        const subElement = element.questions[index];
-                        if (subElement.stepsPicID) {
-                            await cloudinary.uploader.destroy(subElement.stepsPicID)
-                        }
-                    }
-                }
-                await answerModel.deleteMany({ assignment: assignmentID })
-                const getAssignment = await assignmentModel.find({ createdBy: teacherID }).select('-createdBy').populate([{ path: 'questions', select: '-chapter' }, { path: 'classes', select: 'class' }, { path: 'students.solveBy', select: 'userName' }]).sort({ _id: -1 })
-                res.json({ message: "success", allAssignment: getAssignment })
-            } else {
-                res.json({ message: "an error is happend" })
-            }
+        const { assignmentID } = req.params
+        const removeAssignment = await assignmentModel.findByIdAndDelete(assignmentID)
+        if (removeAssignment) {
+            const getAssignment = await assignmentModel.find({ createdBy: teacherID }).select('-createdBy').populate([{ path: 'questions', select: '-chapter' }, { path: 'classes', select: 'class' }, { path: 'students.solveBy', select: 'userName' }]).sort({ _id: -1 })
+            res.json({ message: "success", allAssignment: getAssignment })
         } else {
             res.json({ message: "This assignment is not found" })
         }
@@ -87,16 +70,104 @@ const deleteAssignment = async (req, res) => {
     }
 }
 
-// Add this function to your assignment controller file
+// NEW: Duplicate/Re-assign an assignment
+const duplicateAssignment = async (req, res) => {
+    try {
+        const teacherID = req.userData._id;
+        const { assignmentID } = req.params;
+        
+        console.log('=== duplicateAssignment START ===');
+        console.log('Teacher ID:', teacherID);
+        console.log('Assignment ID to duplicate:', assignmentID);
+        console.log('New assignment data:', req.body);
+
+        // Find the original assignment
+        const originalAssignment = await assignmentModel.findById(assignmentID);
+        
+        if (!originalAssignment) {
+            console.log('ERROR: Original assignment not found');
+            return res.status(404).json({ message: "Original assignment not found" });
+        }
+
+        // Verify teacher owns this assignment
+        if (String(originalAssignment.createdBy) !== String(teacherID)) {
+            console.log('ERROR: Teacher does not own this assignment');
+            return res.status(403).json({ message: "You don't have permission to duplicate this assignment" });
+        }
+
+        console.log('Original assignment found:', originalAssignment.title);
+
+        // Create new assignment based on original, but with new data from request
+        const today = new Date().toISOString().slice(0, 10);
+        
+        const newAssignmentData = {
+            // Copy from original assignment
+            questions: originalAssignment.questions, // Same questions
+            totalPoints: originalAssignment.totalPoints, // Same total points
+            
+            // Use new data from request body (title, dates, timer, attempts, classes)
+            title: req.body.title,
+            timer: req.body.timer,
+            attemptsNumber: req.body.attemptsNumber || 1,
+            startDate: req.body.startDate,
+            endDate: req.body.endDate,
+            classes: req.body.classes,
+            
+            // New metadata
+            createdBy: teacherID,
+            createdAt: today,
+            students: [] // Start with no students (they haven't taken it yet)
+        };
+
+        console.log('Creating new assignment with data:', newAssignmentData);
+
+        const newAssignment = new assignmentModel(newAssignmentData);
+        await newAssignment.save();
+
+        console.log('New assignment created with ID:', newAssignment._id);
+
+        // Get all assignments to return to frontend
+        const allAssignments = await assignmentModel
+            .find({ createdBy: teacherID })
+            .select('-createdBy')
+            .populate([
+                { path: 'questions', select: '-chapter' },
+                { path: 'classes', select: 'class' },
+                { path: 'students.solveBy', select: 'userName' }
+            ])
+            .sort({ _id: -1 });
+
+        console.log('=== duplicateAssignment END ===');
+        
+        res.json({ 
+            message: "success", 
+            allAssignment: allAssignments,
+            newAssignmentId: newAssignment._id
+        });
+        
+    } catch (error) {
+        console.error('=== duplicateAssignment ERROR ===');
+        console.error('Error details:', error.message);
+        console.error('Stack trace:', error.stack);
+        res.status(502).json({ message: error.message });
+    }
+};
+
 const getStudentResults = async (req, res) => {
     try {
         const { assignmentID } = req.params;
         const teacherID = req.userData._id;
 
-        // Verify teacher owns this assignment
-        const assignment = await assignmentModel.findById(assignmentID);
+        console.log('=== getStudentResults START ===');
+        console.log('Assignment ID:', assignmentID);
+        console.log('Teacher ID:', teacherID);
+
+        // Get the assignment and verify teacher owns it
+        const assignment = await assignmentModel.findById(assignmentID)
+            .populate('questions');
+
         if (!assignment) {
-            return res.json({ message: "Assignment not found" });
+            return res.status(404).json({ message: "Assignment not found" });
         }
 
         // Check if teacher created this assignment
@@ -160,11 +231,12 @@ const getStudentResults = async (req, res) => {
     }
 };
 
-// FIXED: Add getStudentResults to the exports
+// FIXED: Add getStudentResults and duplicateAssignment to the exports
 module.exports = { 
     createAssignment, 
     getAssignment, 
     updateAssignment, 
     deleteAssignment,
-    getStudentResults  // ADD THIS LINE
+    getStudentResults,
+    duplicateAssignment  // ADD THIS LINE
 }
