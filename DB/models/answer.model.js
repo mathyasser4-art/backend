@@ -9,9 +9,18 @@ const answerSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "user"
     },
+    attemptNumber: {
+        type: Number,
+        required: true,
+        default: 1
+    },
     time: {
         type: String,
         default: "0:00"  // Add default value
+    },
+    completedAt: {
+        type: Date,
+        default: null
     },
     questions: [
         {
@@ -31,6 +40,8 @@ const answerSchema = new mongoose.Schema({
     ],
     total: Number,
     questionsNumber: Number,
+}, { 
+    timestamps: true 
 })
 
 const answerModel = mongoose.model('answer', answerSchema)

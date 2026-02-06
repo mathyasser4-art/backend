@@ -24,7 +24,19 @@ const getResult = async (req, res) => {
         fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:22',message:'getResult - query attempt',data:{studentID:studentID?.toString(),studentIDType:typeof studentID,assignmentID:assignmentID,assignmentIDType:typeof assignmentID,isValidObjectId_studentID:mongoose.Types.ObjectId.isValid(studentID),isValidObjectId_assignmentID:mongoose.Types.ObjectId.isValid(assignmentID)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'GET_RESULT_QUERY'})}).catch(()=>{});
         // #endregion
 
-        const findAnswer = await answerModel.findOne({ solveBy: studentID, assignment: assignmentID });
+        // Get current attempt number from assignment
+        const assignmentDoc = await assignmentModel.findById(assignmentID);
+        const studentRecord = assignmentDoc.students?.find(s => String(s.solveBy) === String(studentID));
+        const currentAttemptNumber = studentRecord?.attempts || 1;
+
+        console.log('Getting result for attempt number:', currentAttemptNumber);
+
+        // Find answer for THIS specific attempt
+        const findAnswer = await answerModel.findOne({ 
+            solveBy: studentID, 
+            assignment: assignmentID,
+            attemptNumber: currentAttemptNumber
+        });
 
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'answer/controller/answer.controller.js:24',message:'getResult - query result',data:{foundAnswer:!!findAnswer,answerDocId:findAnswer?._id?.toString(),questionsCount:findAnswer?.questions?.length || 0,solveByInDoc:findAnswer?.solveBy?.toString(),assignmentInDoc:findAnswer?.assignment?.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'GET_RESULT_QUERY'})}).catch(()=>{});
@@ -198,6 +210,11 @@ const getResult = async (req, res) => {
             // Not when they finish it. The old code was setting attempts = attemptsNumber,
             // which incorrectly marked the assignment as "completed" immediately after first submission
 
+            // Mark completion time for this attempt
+            if (!findAnswer.completedAt) {
+                findAnswer.completedAt = new Date();
+            }
+
             await findAnswer.save();
 
             console.log('getResult - Final total score:', findAnswer.total);
@@ -257,13 +274,26 @@ const checkAssinmentAnswer = async (req, res) => {
             points: question.questionPoints
         });
 
-        let findAnswer = await answerModel.findOne({ solveBy: studentID, assignment: assignmentID });
+        // Get current attempt number from assignment
+        const assignment = await assignmentModel.findById(assignmentID);
+        const studentRecord = assignment.students?.find(s => String(s.solveBy) === String(studentID));
+        const currentAttemptNumber = studentRecord?.attempts || 1;
+
+        console.log('Current attempt number:', currentAttemptNumber);
+
+        // Find answer document for THIS specific attempt
+        let findAnswer = await answerModel.findOne({ 
+            solveBy: studentID, 
+            assignment: assignmentID,
+            attemptNumber: currentAttemptNumber
+        });
 
         if (!findAnswer) {
-            console.log('Creating new answer document for student');
+            console.log('Creating new answer document for attempt', currentAttemptNumber);
             findAnswer = await answerModel.create({
                 solveBy: studentID,
                 assignment: assignmentID,
+                attemptNumber: currentAttemptNumber,
                 questionsNumber: 0,
                 questions: []
             });
@@ -411,7 +441,7 @@ const getAssignmentAnswer = async (req, res) => {
 
         if (!answers) {
             console.log('ERROR: No answers found for this student/assignment combination');
-            return res.status(404).json({ message: "No answers found for this assignment" });
+            return res.status(404).json({ message: "the student closed the assignment before completing it" });
         }
 
         console.log('Answer document found with ID:', answers._id);
@@ -544,7 +574,7 @@ const getStudentOwnReport = async (req, res) => {
         });
 
         if (!answers) {
-            return res.status(404).json({ message: "No answers found for this assignment" });
+            return res.status(404).json({ message: "the student closed the assignment before completing it" });
         }
 
         // Get all questions with their details
@@ -649,5 +679,57 @@ const debugAnswerDocument = async (req, res) => {
     }
 };
 
+// Get all attempts for a student on an assignment
+const getAllAttempts = async (req, res) => {
+    try {
+        const { assignmentID } = req.params;
+        const studentID = req.userData._id;
+
+        console.log('=== getAllAttempts START ===');
+        console.log('Student ID:', studentID);
+        console.log('Assignment ID:', assignmentID);
+
+        // Find all answer documents for this student and assignment
+        const allAttempts = await answerModel.find({
+            solveBy: studentID,
+            assignment: assignmentID
+        }).sort({ attemptNumber: 1 }).select('attemptNumber total time completedAt createdAt');
+
+        // Get assignment details for context
+        const assignment = await assignmentModel.findById(assignmentID).select('title totalPoints attemptsNumber students');
+        const studentRecord = assignment.students?.find(s => String(s.solveBy) === String(studentID));
+        const currentAttemptNumber = studentRecord?.attempts || 0;
+
+        console.log('Found attempts:', allAttempts.length);
+        console.log('Current attempt number:', currentAttemptNumber);
+
+        // Calculate statistics
+        const completedAttempts = allAttempts.filter(a => a.completedAt);
+        const scores = completedAttempts.map(a => a.total || 0);
+        const bestScore = scores.length > 0 ? Math.max(...scores) : 0;
+        const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+
+        res.json({
+            message: "success",
+            attempts: allAttempts,
+            statistics: {
+                totalAttempts: allAttempts.length,
+                completedAttempts: completedAttempts.length,
+                currentAttempt: currentAttemptNumber,
+                remainingAttempts: Math.max(0, assignment.attemptsNumber - currentAttemptNumber),
+                maxAttempts: assignment.attemptsNumber,
+                bestScore: bestScore,
+                averageScore: Math.round(averageScore * 100) / 100,
+                totalPossiblePoints: assignment.totalPoints
+            }
+        });
+
+        console.log('=== getAllAttempts END ===');
+    } catch (error) {
+        console.error('getAllAttempts error:', error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // Note: correctAnswer function kept for backward compatibility but not exposed in routes
-module.exports = { checkAssinmentAnswer, getAssignmentAnswer, getResult, getStudentOwnReport, debugAnswerDocument }
+module.exports = { checkAssinmentAnswer, getAssignmentAnswer, getResult, getStudentOwnReport, debugAnswerDocument, getAllAttempts }

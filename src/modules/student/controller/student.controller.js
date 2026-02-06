@@ -216,20 +216,38 @@ const getAssignmentDetails = async (req, res) => {
             }
             const findStudent = assignment.students?.filter(e => String(e.solveBy) == String(studentID))[0]
             if (findStudent) {
-                if (findStudent.attempts == assignment.attemptsNumber) {
+                if (findStudent.attempts >= assignment.attemptsNumber) {
                     res.json({ message: "Oops!!You can't open this assignment, your number of attempts has expired." })
                 } else {
                     const findIndex = assignment.students?.findIndex(object => String(object.solveBy) == String(studentID))
-                    assignment.students[findIndex].attempts = findStudent.attempts + 1
+                    const currentAttemptNumber = findStudent.attempts + 1
+                    assignment.students[findIndex].attempts = currentAttemptNumber
                     await assignment.save()
-                    const findAnswer = await answerModel.findOne({ solveBy: studentID, assignment: assignmentID }).select('questions')
+                    
+                    // Find answer for current attempt (not previous attempts)
+                    const findAnswer = await answerModel.findOne({ 
+                        solveBy: studentID, 
+                        assignment: assignmentID,
+                        attemptNumber: currentAttemptNumber
+                    }).select('questions')
+                    
                     assignment = assignment.toObject();
-                    assignment.questions.forEach(question => {
-                        const answerObj = findAnswer?.questions.find(e => e.question.toString() === question._id.toString());
-                        if (answerObj && answerObj.firstAnswer !== undefined) {
-                            question.questionAnswer = answerObj.firstAnswer;
-                        }
-                    });
+                    
+                    // Include attempt information in response
+                    assignment.currentAttempt = currentAttemptNumber;
+                    assignment.totalAttempts = assignment.attemptsNumber;
+                    assignment.remainingAttempts = assignment.attemptsNumber - currentAttemptNumber;
+                    
+                    // Only pre-fill answers if this attempt already has saved answers
+                    if (findAnswer) {
+                        assignment.questions.forEach(question => {
+                            const answerObj = findAnswer?.questions.find(e => e.question.toString() === question._id.toString());
+                            if (answerObj && answerObj.firstAnswer !== undefined) {
+                                question.questionAnswer = answerObj.firstAnswer;
+                            }
+                        });
+                    }
+                    
                     res.json({ message: "success", assignment })
                 }
             } else {
@@ -238,6 +256,12 @@ const getAssignmentDetails = async (req, res) => {
                 newStudent.solveBy = studentID
                 assignment.students.push(newStudent)
                 await assignment.save()
+                
+                assignment = assignment.toObject();
+                assignment.currentAttempt = 1;
+                assignment.totalAttempts = assignment.attemptsNumber;
+                assignment.remainingAttempts = assignment.attemptsNumber - 1;
+                
                 res.json({ message: "success", assignment })
             }
         } else {
