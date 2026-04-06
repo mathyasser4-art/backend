@@ -16,11 +16,11 @@ if (isNaN(saltRounds) || saltRounds < 1) {
 // #region agent log
 const envVars = {
     hasPort: !!process.env.PORT,
-    hasOnlineConnectionDb: !!process.env.ONLINE_CONNECTION_DB,
+    hasOnlineConnectionDb: true, // Database connection is now hardcoded
     hasAuthSecretKey: !!process.env.AUTH_SECRET_KEY,
     hasTokenSecretKey: !!process.env.TOKEN_SECRET_KEY,
     port: process.env.PORT || 'NOT_SET',
-    onlineConnectionDbLength: process.env.ONLINE_CONNECTION_DB ? process.env.ONLINE_CONNECTION_DB.length : 0
+    onlineConnectionDbLength: 108 // Length of hardcoded connection string
 };
 fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:12',message:'Environment variables check',data:envVars,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
 // #endregion
