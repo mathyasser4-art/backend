@@ -21,6 +21,8 @@ const whitelist = [
   'https://abacus-2ntk.onrender.com',
   'https://backend-production-6752.up.railway.app',
   'https://abacus-dashboard-one.vercel.app',
+  'https://dashboard-alpha-woad-54.vercel.app',
+  'https://dashboard-33v3lnkua-abacusheroes-projects.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001'
 ];
