@@ -267,7 +267,13 @@ const getQuestionsByLevel = async (req, res) => {
         if (questions && questions.length > 0) {
             res.json({ message: "success", questions });
         } else {
-            res.json({ message: "no questions found for this level" });
+            // Fallback: fetch random questions from the entire database
+            const randomQuestions = await questionModel.aggregate([{ $sample: { size: 50 } }]);
+            if (randomQuestions && randomQuestions.length > 0) {
+                res.json({ message: "success", questions: randomQuestions });
+            } else {
+                res.json({ message: "no questions found in the database" });
+            }
         }
     } catch (error) {
         res.status(502).json({ message: error.message });
