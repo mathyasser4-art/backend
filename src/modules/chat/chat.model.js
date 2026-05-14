@@ -6,6 +6,14 @@ const chatSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    userName: {
+        type: String,
+        default: ''
+    },
+    userPhone: {
+        type: String,
+        default: ''
+    },
     status: {
         type: String,
         enum: ['open', 'closed'],

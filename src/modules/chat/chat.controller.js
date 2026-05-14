@@ -25,7 +25,7 @@ exports.syncChat = async (req, res) => {
 
 exports.sendMessage = async (req, res) => {
     try {
-        const { sessionId, text } = req.body;
+        const { sessionId, text, userName, userPhone } = req.body;
         
         if (!sessionId || !text) {
             return res.status(400).json({ message: 'sessionId and text are required' });
@@ -33,7 +33,16 @@ exports.sendMessage = async (req, res) => {
 
         let chat = await Chat.findOne({ sessionId });
         if (!chat) {
-            chat = new Chat({ sessionId, messages: [] });
+            chat = new Chat({ 
+                sessionId, 
+                messages: [],
+                userName: userName || '',
+                userPhone: userPhone || ''
+            });
+        } else {
+            // Update info if provided and was empty
+            if (userName && !chat.userName) chat.userName = userName;
+            if (userPhone && !chat.userPhone) chat.userPhone = userPhone;
         }
 
         chat.messages.push({
