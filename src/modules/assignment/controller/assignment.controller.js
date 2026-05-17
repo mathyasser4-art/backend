@@ -231,6 +231,23 @@ const getStudentResults = async (req, res) => {
     }
 };
 
+const getAssignmentByClass = async (req, res) => {
+    try {
+        const { classID } = req.params;
+        const allAssignment = await assignmentModel.find({ classes: classID })
+            .populate([{ path: 'questions', select: '-chapter -correctAnswer -questionPicID -wrongAnswerID' }, { path: 'classes', select: 'class' }, { path: 'students.solveBy', select: 'userName' }])
+            .sort({ _id: -1 });
+
+        if (allAssignment.length != 0) {
+            res.json({ message: "success", allAssignment });
+        } else {
+            res.json({ message: "There is no any assignment yet." });
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
 // FIXED: Add getStudentResults and duplicateAssignment to the exports
 module.exports = { 
     createAssignment, 
@@ -238,5 +255,6 @@ module.exports = {
     updateAssignment, 
     deleteAssignment,
     getStudentResults,
-    duplicateAssignment  // ADD THIS LINE
+    duplicateAssignment,  // ADD THIS LINE
+    getAssignmentByClass
 }
