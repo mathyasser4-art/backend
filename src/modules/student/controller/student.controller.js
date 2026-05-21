@@ -187,7 +187,20 @@ const getAssignment = async (req, res) => {
                 for (let index = 0; index < getAssignment.length; index++) {
                     const element = getAssignment[index];
                     if (element.classes.includes(findStudent.class)) {
-                        allAssignment.push(element)
+                        // Check if this student has a completed answer for this assignment
+                        const completedAnswer = await answerModel.findOne({
+                            solveBy: studentID,
+                            assignment: element._id,
+                            total: { $exists: true, $ne: null }
+                        }).select('total questionsNumber').lean()
+
+                        const assignmentObj = element.toObject()
+                        assignmentObj.isCompleted = !!completedAnswer
+                        if (completedAnswer) {
+                            assignmentObj.resultScore = completedAnswer.total
+                            assignmentObj.resultTotal = completedAnswer.questionsNumber
+                        }
+                        allAssignment.push(assignmentObj)
                     }
                 }
                 res.json({ message: 'success', allAssignment })
