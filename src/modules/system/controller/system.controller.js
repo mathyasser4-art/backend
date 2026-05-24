@@ -1,4 +1,5 @@
 const systemModel = require('../../../../DB/models/system.model')
+const unitModel = require('../../../../DB/models/unit.model')
 
 const addSystem = async (req, res) => {
     try {
@@ -21,8 +22,30 @@ const getAllSystem = async (req, res) => {
             query.questionTypeID = questionTypeID
         }
         
-        const allSystem = await systemModel.find(query).populate('subjects')
+        const allSystem = await systemModel.find(query).populate('subjects').lean()
         if (allSystem.length != 0) {
+            // Compute question count for each subject in each system
+            for (let sys of allSystem) {
+                const qTypeID = questionTypeID || sys.questionTypeID;
+                if (sys.subjects) {
+                    for (let sub of sys.subjects) {
+                        if (qTypeID) {
+                            const units = await unitModel.find({ subject: sub._id, questionType: qTypeID }).populate('chapters', 'questions');
+                            let totalQuestions = 0;
+                            for (const u of units) {
+                                if (u.chapters) {
+                                    for (const ch of u.chapters) {
+                                        totalQuestions += ch.questions ? ch.questions.length : 0;
+                                    }
+                                }
+                            }
+                            sub.hasQuestions = totalQuestions > 0;
+                        } else {
+                            sub.hasQuestions = false;
+                        }
+                    }
+                }
+            }
             res.json({ message: "success", allSystem })
         } else {
             res.json({ message: "There are no system now." })
