@@ -8,7 +8,7 @@ const login = async (req, res) => {
 
         const findUser = await userModel.findOne({ email });
         if (!findUser) {
-            return res.json({ message: 'This email is not registered' });
+            return res.json({ message: 'Incorrect username or password' });
         }
 
         if (!findUser.verify) {
@@ -21,7 +21,7 @@ const login = async (req, res) => {
 
         const isPasswordMatch = await bcrypt.compare(password, findUser.password);
         if (!isPasswordMatch) {
-            return res.json({ message: 'Incorrect password' });
+            return res.json({ message: 'Incorrect username or password' });
         }
 
         const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
