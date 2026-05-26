@@ -23,6 +23,7 @@ const getAllSystem = async (req, res) => {
         
         const allSystem = await systemModel.find(query).populate('subjects')
         if (allSystem.length != 0) {
+            res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
             res.json({ message: "success", allSystem })
         } else {
             res.json({ message: "There are no system now." })

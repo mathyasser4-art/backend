@@ -17,5 +17,6 @@ const answerRouter = require('../src/modules/answer/answer.routes')
 const itRouter = require('../src/modules/IT/it.routes')
 const supervisorRouter = require('../src/modules/supervisor/supervisor.routes')
 const chatRouter = require('../src/modules/chat/chat.routes')
+const competitionRouter = require('../src/modules/competition/competition.routes')
 
-module.exports = { authRouter, userRouter, systemRouter, questionTypeRouter, unitRouter, chapterRouter, questionRouter, adminRouter, subjectRouter, classRouter, schoolRouter, schoolSubjectRouter, teacherRouter, studentRouter, assignmentRouter, answerRouter, itRouter, supervisorRouter, chatRouter }
+module.exports = { authRouter, userRouter, systemRouter, questionTypeRouter, unitRouter, chapterRouter, questionRouter, adminRouter, subjectRouter, classRouter, schoolRouter, schoolSubjectRouter, teacherRouter, studentRouter, assignmentRouter, answerRouter, itRouter, supervisorRouter, chatRouter, competitionRouter }

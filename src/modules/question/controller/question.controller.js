@@ -197,6 +197,7 @@ const getQuestionDetails = async (req, res) => {
         const { questionID } = req.params
         const question = await questionModel.findById(questionID)
         if (question) {
+            res.set('Cache-Control', 'public, max-age=10, s-maxage=60, stale-while-revalidate=30');
             res.json({ message: "success", question });
         } else {
             res.json({ message: "this question is not available" });
@@ -265,11 +266,13 @@ const getQuestionsByLevel = async (req, res) => {
 
         const questions = await questionModel.find({ level: levelNum });
         if (questions && questions.length > 0) {
+            res.set('Cache-Control', 'public, max-age=10, s-maxage=60, stale-while-revalidate=30');
             res.json({ message: "success", questions });
         } else {
             // Fallback: fetch random questions from the entire database
             const randomQuestions = await questionModel.aggregate([{ $sample: { size: 50 } }]);
             if (randomQuestions && randomQuestions.length > 0) {
+                res.set('Cache-Control', 'public, max-age=5, s-maxage=10');
                 res.json({ message: "success", questions: randomQuestions });
             } else {
                 res.json({ message: "no questions found in the database" });
