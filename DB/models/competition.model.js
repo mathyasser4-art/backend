@@ -36,6 +36,14 @@ const competitionSchema = new mongoose.Schema({
                 type: Number, 
                 default: 0 
             },
+            totalAnswered: {
+                type: Number,
+                default: 0
+            },
+            wrongAnswers: {
+                type: Number,
+                default: 0
+            },
             finishedAt: {
                 type: Date
             }

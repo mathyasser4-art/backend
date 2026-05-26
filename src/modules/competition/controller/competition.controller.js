@@ -151,7 +151,7 @@ const updateLiveScore = async (req, res) => {
     try {
         const studentID = req.userData._id;
         const { competitionId } = req.params;
-        const { score, finished } = req.body;
+        const { score, totalAnswered, wrongAnswers, finished } = req.body;
 
         const competition = await competitionModel.findById(competitionId);
         if (!competition) {
@@ -172,6 +172,8 @@ const updateLiveScore = async (req, res) => {
         }
 
         participant.score = score !== undefined ? score : participant.score;
+        participant.totalAnswered = totalAnswered !== undefined ? totalAnswered : participant.totalAnswered;
+        participant.wrongAnswers = wrongAnswers !== undefined ? wrongAnswers : participant.wrongAnswers;
         if (finished) {
             participant.finishedAt = new Date();
         }
@@ -185,6 +187,8 @@ const updateLiveScore = async (req, res) => {
             studentId: studentID,
             userName: studentDetails.userName,
             score: participant.score,
+            totalAnswered: participant.totalAnswered,
+            wrongAnswers: participant.wrongAnswers,
             finished: !!finished
         });
 
