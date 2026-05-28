@@ -55,13 +55,30 @@ const getTeacherCompetitions = async (req, res) => {
 const getCompetitionDetails = async (req, res) => {
     try {
         const { competitionId } = req.params;
+        const requesterId = req.userData?._id;
+
         const competition = await competitionModel.findById(competitionId)
-            .populate('questions', '-correctAnswer -chapter')
             .populate('participants.student', 'userName email')
             .populate('createdBy', 'userName email');
 
         if (!competition) {
             return res.status(404).json({ message: "Competition not found" });
+        }
+
+        const isTeacher = String(competition.createdBy?._id || competition.createdBy) === String(requesterId);
+
+        if (isTeacher) {
+            // Teacher gets full question details including correct answers
+            await competition.populate({
+                path: 'questions',
+                select: '-chapter'
+            });
+        } else {
+            // Student gets questions without correctAnswer
+            await competition.populate({
+                path: 'questions',
+                select: '-correctAnswer -chapter'
+            });
         }
 
         res.json({ message: "success", competition });
@@ -169,7 +186,7 @@ const updateLiveScore = async (req, res) => {
     try {
         const studentID = req.userData._id;
         const { competitionId } = req.params;
-        const { score, totalAnswered, wrongAnswers, finished } = req.body;
+        const { score, totalAnswered, wrongAnswers, finished, answers } = req.body;
 
         const competition = await competitionModel.findById(competitionId);
         if (!competition) {
@@ -192,10 +209,14 @@ const updateLiveScore = async (req, res) => {
         participant.score = score !== undefined ? score : participant.score;
         participant.totalAnswered = totalAnswered !== undefined ? totalAnswered : participant.totalAnswered;
         participant.wrongAnswers = wrongAnswers !== undefined ? wrongAnswers : participant.wrongAnswers;
-        if (finished) {
+        if (finished && !participant.finishedAt) {
             participant.finishedAt = new Date();
         }
+        if (answers !== undefined) {
+            participant.answers = answers;
+        }
 
+        competition.markModified('participants');
         await competition.save();
 
         const studentDetails = await userModel.findById(studentID).select('userName');
@@ -207,7 +228,9 @@ const updateLiveScore = async (req, res) => {
             score: participant.score,
             totalAnswered: participant.totalAnswered,
             wrongAnswers: participant.wrongAnswers,
-            finished: !!finished
+            finished: !!finished,
+            finishedAt: participant.finishedAt,
+            answers: participant.answers
         });
 
         res.json({ message: "success" });

@@ -46,7 +46,14 @@ const competitionSchema = new mongoose.Schema({
             },
             finishedAt: {
                 type: Date
-            }
+            },
+            answers: [
+                {
+                    question: { type: mongoose.Schema.Types.ObjectId, ref: "question" },
+                    studentAnswer: String,
+                    isCorrect: Boolean
+                }
+            ]
         }
     ],
     createdAt: {
