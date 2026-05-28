@@ -193,7 +193,9 @@ const updateLiveScore = async (req, res) => {
             return res.status(404).json({ message: "Competition not found" });
         }
 
-        if (competition.status !== 'active') {
+        // Allow updates in both 'active' and 'finished' states so students
+        // who finish just as the teacher ends the battle can still save their final score
+        if (competition.status !== 'active' && competition.status !== 'finished') {
             return res.status(400).json({ message: "Competition is not active" });
         }
 
