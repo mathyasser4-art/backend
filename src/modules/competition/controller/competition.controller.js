@@ -99,13 +99,20 @@ const joinCompetition = async (req, res) => {
         const studentDetails = await userModel.findById(studentID).select('userName email');
 
         // Broadcast "student-joined" event to the lobby channel
-        await pusher.trigger(`competition-${competitionId}`, 'student-joined', {
-            studentId: studentDetails._id,
-            userName: studentDetails.userName
-        });
+        try {
+            console.log(`Attempting to trigger student-joined for competition-${competitionId}`);
+            await pusher.trigger(`competition-${competitionId}`, 'student-joined', {
+                studentId: String(studentDetails._id),
+                userName: studentDetails.userName
+            });
+            console.log(`Successfully triggered student-joined for ${studentDetails.userName}`);
+        } catch (pusherErr) {
+            console.error('Pusher trigger error in joinCompetition:', pusherErr);
+        }
 
         res.json({ message: "success", competition });
     } catch (error) {
+        console.error('Error in joinCompetition:', error);
         res.status(502).json({ message: error.message });
     }
 };
