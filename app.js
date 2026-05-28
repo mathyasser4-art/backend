@@ -29,13 +29,18 @@ const whitelist = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, Postman, or same-origin)
+    // Allow exact matches from whitelist
     if (!origin || whitelist.indexOf(origin) !== -1) {
-      callback(null, true)
-    } else {
-      console.log('Blocked by CORS:', origin);
-      callback(new Error('Not allowed by CORS'))
+      return callback(null, true);
     }
+    
+    // Allow any Vercel preview branch or local network IPs (e.g. testing from phone)
+    if (origin.endsWith('.vercel.app') || /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) || /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin)) {
+      return callback(null, true);
+    }
+
+    console.log('Blocked by CORS:', origin);
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
