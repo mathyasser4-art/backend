@@ -76,12 +76,18 @@ const joinCompetition = async (req, res) => {
         const studentID = req.userData._id;
         const { competitionId } = req.params;
 
+        console.log(`[JOIN] Student ${studentID} attempting to join competition ${competitionId}`);
+        console.log(`[JOIN] Request origin: ${req.headers.origin || 'unknown'}`);
+        console.log(`[JOIN] Auth header present: ${!!req.headers.authrization}`);
+
         const competition = await competitionModel.findById(competitionId);
         if (!competition) {
+            console.log(`[JOIN] Competition ${competitionId} not found`);
             return res.status(404).json({ message: "Competition not found" });
         }
 
         if (competition.status !== 'lobby') {
+            console.log(`[JOIN] Competition status is '${competition.status}', rejecting join`);
             return res.status(400).json({ message: "Cannot join. Competition has already started or finished." });
         }
 
@@ -93,6 +99,9 @@ const joinCompetition = async (req, res) => {
         if (!isAlreadyParticipant) {
             competition.participants.push({ student: studentID, score: 0 });
             await competition.save();
+            console.log(`[JOIN] Student ${studentID} added to participants (total: ${competition.participants.length})`);
+        } else {
+            console.log(`[JOIN] Student ${studentID} already in participants list`);
         }
 
         // Fetch student details to broadcast to other lobby members
@@ -100,19 +109,21 @@ const joinCompetition = async (req, res) => {
 
         // Broadcast "student-joined" event to the lobby channel
         try {
-            console.log(`Attempting to trigger student-joined for competition-${competitionId}`);
-            await pusher.trigger(`competition-${competitionId}`, 'student-joined', {
+            const channelName = `competition-${competitionId}`;
+            const eventData = {
                 studentId: String(studentDetails._id),
                 userName: studentDetails.userName
-            });
-            console.log(`Successfully triggered student-joined for ${studentDetails.userName}`);
+            };
+            console.log(`[JOIN] Triggering Pusher event on channel '${channelName}':`, JSON.stringify(eventData));
+            await pusher.trigger(channelName, 'student-joined', eventData);
+            console.log(`[JOIN] Pusher event triggered successfully for ${studentDetails.userName}`);
         } catch (pusherErr) {
-            console.error('Pusher trigger error in joinCompetition:', pusherErr);
+            console.error('[JOIN] Pusher trigger error:', pusherErr.message, pusherErr.statusCode, pusherErr.body);
         }
 
         res.json({ message: "success", competition });
     } catch (error) {
-        console.error('Error in joinCompetition:', error);
+        console.error('[JOIN] Error in joinCompetition:', error);
         res.status(502).json({ message: error.message });
     }
 };
