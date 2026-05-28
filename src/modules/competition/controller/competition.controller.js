@@ -4,9 +4,9 @@ const userModel = require('../../../../DB/models/user.model');
 
 // Initialize Pusher with keys provided by the user
 const pusher = new Pusher({
-  appId: "215914",
-  key: "18e355bfbafee7a1aa57",
-  secret: "88dae70475dc4b8453a7",
+  appId: "2159196",
+  key: "06df370fb33f1263ec1f",
+  secret: "7a18da6f618ed58c073b",
   cluster: "eu",
   useTLS: true
 });
