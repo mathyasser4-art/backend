@@ -31,6 +31,23 @@ const createCompetition = async (req, res) => {
         });
 
         await newCompetition.save();
+
+        // Fetch teacher name to send in global pusher notification
+        const teacher = await userModel.findById(teacherID).select('userName');
+        const teacherName = teacher ? teacher.userName : "Your Teacher";
+
+        // Trigger real-time global battle notification for active students
+        try {
+            await pusher.trigger('global-battle-arena', 'battle-created', {
+                competitionId: String(newCompetition._id),
+                title: newCompetition.title,
+                teacherName: teacherName
+            });
+            console.log(`[BROADCAST] Triggered battle-created globally for lobby ${newCompetition._id}`);
+        } catch (pusherErr) {
+            console.error('[BROADCAST] Global Pusher trigger error:', pusherErr.message);
+        }
+
         res.status(201).json({ message: "success", competition: newCompetition });
     } catch (error) {
         res.status(502).json({ message: error.message });

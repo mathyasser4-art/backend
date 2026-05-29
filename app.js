@@ -54,11 +54,11 @@ app.use(express.json())
 const connectionDB = require('./DB/connection')
 connectionDB();
 
-// Rate limiting
+// Rate limiting - Set to 1000 to support up to 100 concurrent students competing behind the same classroom NAT IP router
 const rateLimit = require('express-rate-limit');
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 1000,
   message: 'Too many requests, please try again later',
 });
 app.use(limiter);
