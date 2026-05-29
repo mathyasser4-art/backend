@@ -1,4 +1,13 @@
 const mongoose = require('mongoose');
+const dns = require('dns');
+
+// Override default local DNS to use public Google and Cloudflare DNS to bypass any local SRV query blocks
+try {
+    dns.setServers(['8.8.8.8', '1.1.1.1']);
+} catch (e) {
+    console.warn('⚠️ Warning: Failed to set public DNS servers, using system default.');
+}
+
 require('dotenv').config();
 
 const questionModel = require('./DB/models/question.model');
