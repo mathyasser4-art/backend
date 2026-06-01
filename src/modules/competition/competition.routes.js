@@ -6,7 +6,8 @@ const {
     joinCompetition,
     startCompetition,
     updateLiveScore,
-    finishCompetition
+    finishCompetition,
+    triggerMathRacerEvent
 } = require('./controller/competition.controller')
 const { teacherAuth, studentAuth } = require('../../middleware/auth')
 
@@ -22,5 +23,6 @@ competitionRouter.post('/competition/:competitionId/score', studentAuth, updateL
 
 // Shared endpoints (accessible by both teachers and students)
 competitionRouter.get('/competition/:competitionId/details', getCompetitionDetails)
+competitionRouter.post('/competition/mathracer/trigger', triggerMathRacerEvent)
 
 module.exports = competitionRouter

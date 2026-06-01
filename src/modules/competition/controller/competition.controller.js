@@ -322,6 +322,19 @@ const finishCompetition = async (req, res) => {
     }
 };
 
+// 8. Proxy helper to broadcast real-time events for Math Racer Multiplayer Game
+const triggerMathRacerEvent = async (req, res) => {
+    try {
+        const { channelName, eventName, eventData } = req.body;
+        console.log(`[MATHRACER] Proxy trigger event: ${eventName} on channel: ${channelName}`);
+        await pusher.trigger(channelName, eventName, eventData);
+        res.json({ message: "success" });
+    } catch (error) {
+        console.error('[MATHRACER] Proxy trigger error:', error.message);
+        res.status(502).json({ message: error.message });
+    }
+};
+
 module.exports = {
     createCompetition,
     getTeacherCompetitions,
@@ -329,5 +342,6 @@ module.exports = {
     joinCompetition,
     startCompetition,
     updateLiveScore,
-    finishCompetition
+    finishCompetition,
+    triggerMathRacerEvent
 };
