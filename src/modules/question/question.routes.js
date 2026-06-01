@@ -1,6 +1,20 @@
 const questionRouter = require('express').Router()
-const { addQuestion, updateAnswerPic, updateQuestion, checkTheAnswer, getQuestionDetails, deleteQuestion, addGraphQuestion, updateAutoCorrect, getQuestionsByLevel } = require('./controller/question.controller')
+const { 
+    addQuestion, 
+    updateAnswerPic, 
+    updateQuestion, 
+    checkTheAnswer, 
+    getQuestionDetails, 
+    deleteQuestion, 
+    addGraphQuestion, 
+    updateAutoCorrect, 
+    getQuestionsByLevel,
+    reportQuestionError,
+    getSchoolQuestionReports,
+    resolveQuestionReport
+} = require('./controller/question.controller')
 const upload = require('../../middleware/handleMulter')
+const { teacherAuth, schoolAuth } = require('../../middleware/auth')
 
 questionRouter.post('/question/addQuestion', upload.single("image"), addQuestion)
 questionRouter.put('/question/updateAnswerPic/:questionID', upload.single("image"), updateAnswerPic)
@@ -12,4 +26,10 @@ questionRouter.delete('/question/deleteQuestion/:questionID/:chapterID', deleteQ
 questionRouter.put('/question/updateAutoCorrect/:questionID', updateAutoCorrect)
 questionRouter.get('/question/level/:level', getQuestionsByLevel)
 
+// Question reporting endpoints
+questionRouter.post('/question/report-error', teacherAuth, reportQuestionError)
+questionRouter.get('/question/reports', schoolAuth, getSchoolQuestionReports)
+questionRouter.post('/question/report-resolve/:reportID', schoolAuth, resolveQuestionReport)
+
 module.exports = questionRouter
+

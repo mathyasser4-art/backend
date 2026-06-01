@@ -17,24 +17,40 @@ const chapterModel = require('./DB/models/chapter.model');
 function evaluateMath(expression) {
     if (!expression || typeof expression !== 'string') return null;
 
-    // 1. Clean expression
+    // 1. Clean expression (standardize operators)
     let cleaned = expression
         .replace(/×/g, '*')
         .replace(/x/gi, '*')
         .replace(/÷/g, '/')
         .replace(/=\s*\?/g, '')
-        .replace(/=\s*/g, '')
-        .replace(/\s+/g, '');
+        .replace(/=\s*/g, '');
 
-    // 2. Strict validation: only digits, decimal dots, operators +, -, *, /, and parentheses () are allowed
-    const isStrictArithmetic = /^[0-9+\-*/().]+$/.test(cleaned);
+    // 2. Process whitespace to insert implicit '+' signs for multi-line / abacus vertical math
+    let parts = cleaned.trim().split(/\s+/);
+    let reconstructed = '';
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (i > 0) {
+            const prevPart = parts[i - 1];
+            const startsWithDigitOrDot = /^[0-9.]/.test(part);
+            const prevEndsWithOperator = /[+\-*/(]$/.test(prevPart);
+            
+            if (startsWithDigitOrDot && !prevEndsWithOperator) {
+                reconstructed += '+';
+            }
+        }
+        reconstructed += part;
+    }
+
+    // 3. Strict validation: only digits, decimal dots, operators +, -, *, /, and parentheses () are allowed
+    const isStrictArithmetic = /^[0-9+\-*/().]+$/.test(reconstructed);
     if (!isStrictArithmetic) {
         return null; // Not a strictly numeric arithmetic expression (could be a word problem or image prompt)
     }
 
     try {
         // Safe evaluation of strict mathematical expression
-        const result = Function(`"use strict"; return (${cleaned})`)();
+        const result = Function(`"use strict"; return (${reconstructed})`)();
         
         // Return rounded to 4 decimal places to prevent float rounding mismatch
         return typeof result === 'number' && !isNaN(result) ? Math.round(result * 10000) / 10000 : null;

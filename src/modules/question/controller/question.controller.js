@@ -1,5 +1,7 @@
 const questionModel = require('../../../../DB/models/question.model')
 const chapterModel = require('../../../../DB/models/chapter.model')
+const userModel = require('../../../../DB/models/user.model')
+const questionReportModel = require('../../../../DB/models/questionReport.model')
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
@@ -283,4 +285,153 @@ const getQuestionsByLevel = async (req, res) => {
     }
 }
 
-module.exports = { addQuestion, updateAnswerPic, updateQuestion, checkTheAnswer, getQuestionDetails, deleteQuestion, addGraphQuestion, updateAutoCorrect, getQuestionsByLevel }
+// ── Math evaluator utility for auto-correction ───────────────────────────────
+function evaluateMath(expression) {
+    if (!expression || typeof expression !== 'string') return null;
+
+    let cleaned = expression
+        .replace(/×/g, '*')
+        .replace(/x/gi, '*')
+        .replace(/÷/g, '/')
+        .replace(/=\s*\?/g, '')
+        .replace(/=\s*/g, '');
+
+    let parts = cleaned.trim().split(/\s+/);
+    let reconstructed = '';
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (i > 0) {
+            const prevPart = parts[i - 1];
+            const startsWithDigitOrDot = /^[0-9.]/.test(part);
+            const prevEndsWithOperator = /[+\-*/(]$/.test(prevPart);
+            
+            if (startsWithDigitOrDot && !prevEndsWithOperator) {
+                reconstructed += '+';
+            }
+        }
+        reconstructed += part;
+    }
+
+    const isStrictArithmetic = /^[0-9+\-*/().]+$/.test(reconstructed);
+    if (!isStrictArithmetic) {
+        return null;
+    }
+
+    try {
+        const result = Function(`"use strict"; return (${reconstructed})`)();
+        return typeof result === 'number' && !isNaN(result) ? Math.round(result * 10000) / 10000 : null;
+    } catch (err) {
+        return null;
+    }
+}
+
+// ── 1. Toggle reporting a question error (Teacher Only) ──────────────────────
+const reportQuestionError = async (req, res) => {
+    try {
+        const teacherID = req.userData._id;
+        const { questionID, issueType, teacherComment } = req.body;
+
+        if (!questionID) {
+            return res.status(400).json({ message: "Question ID is required" });
+        }
+
+        // Retrieve teacher's governing School ID
+        const teacherUser = await userModel.findById(teacherID).select('createdBy');
+        if (!teacherUser) {
+            return res.status(404).json({ message: "Teacher account not found" });
+        }
+
+        const schoolID = teacherUser.createdBy || teacherID; // Fallback to teacherID if orphan
+
+        // Check if report already exists (Toggle behavior)
+        const existing = await questionReportModel.findOne({ question: questionID, reportedBy: teacherID });
+        if (existing) {
+            await questionReportModel.findByIdAndDelete(existing._id);
+            return res.json({ message: "success", status: "unreported" });
+        }
+
+        // Save new report
+        const report = new questionReportModel({
+            question: questionID,
+            reportedBy: teacherID,
+            school: schoolID,
+            issueType: issueType || 'answer',
+            teacherComment: teacherComment || ''
+        });
+
+        await report.save();
+        res.json({ message: "success", status: "reported", report });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+// ── 2. Get reported questions for the logged-in School Account ────────────────
+const getSchoolQuestionReports = async (req, res) => {
+    try {
+        const schoolID = req.userData._id;
+
+        const reports = await questionReportModel.find({ school: schoolID })
+            .populate('question')
+            .populate('reportedBy', 'userName email')
+            .sort({ _id: -1 });
+
+        res.json({ message: "success", reports });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+// ── 3. Resolve a reported question (School Account Only: Auto-Correct / Dismiss) 
+const resolveQuestionReport = async (req, res) => {
+    try {
+        const { reportID } = req.params;
+        const { action } = req.body; // 'correct' or 'dismiss'
+
+        const report = await questionReportModel.findById(reportID).populate('question');
+        if (!report) {
+            return res.status(404).json({ message: "Report not found" });
+        }
+
+        if (action === 'correct') {
+            const questionDoc = report.question;
+            if (!questionDoc) {
+                return res.status(404).json({ message: "Question document not found" });
+            }
+
+            // Mathematically evaluate correct solution
+            const correctValue = evaluateMath(questionDoc.question);
+            if (correctValue !== null) {
+                if (questionDoc.typeOfAnswer === 'Essay') {
+                    questionDoc.answer = [String(correctValue)];
+                } else if (questionDoc.typeOfAnswer === 'MCQ') {
+                    questionDoc.correctAnswer = String(correctValue);
+                }
+                await questionDoc.save();
+            } else {
+                return res.status(400).json({ message: "This question cannot be auto-corrected (non-mathematical content)" });
+            }
+        }
+
+        // Successfully resolved/dismissed, remove report from database
+        await questionReportModel.findByIdAndDelete(reportID);
+        res.json({ message: "success" });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+module.exports = { 
+    addQuestion, 
+    updateAnswerPic, 
+    updateQuestion, 
+    checkTheAnswer, 
+    getQuestionDetails, 
+    deleteQuestion, 
+    addGraphQuestion, 
+    updateAutoCorrect, 
+    getQuestionsByLevel,
+    reportQuestionError,
+    getSchoolQuestionReports,
+    resolveQuestionReport
+}
