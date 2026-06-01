@@ -197,15 +197,27 @@ const getStudentResults = async (req, res) => {
         }
 
         const students = answers.map(answer => {
-            const percentage = totalPoints > 0 ? Math.round((answer.total / totalPoints) * 100) : 0;
+            // Deduplicate questions to get the actual correct score and question count
+            const uniqueQuestionsMap = new Map();
+            answer.questions.forEach(q => {
+                if (q.question) {
+                    uniqueQuestionsMap.set(q.question.toString(), q);
+                }
+            });
+            const uniqueQuestions = Array.from(uniqueQuestionsMap.values());
+            
+            // Recalculate score from unique questions
+            const uniqueScore = uniqueQuestions.reduce((sum, q) => sum + (q.isCorrect ? (q.point || 0) : 0), 0);
+
+            const percentage = totalPoints > 0 ? Math.round((uniqueScore / totalPoints) * 100) : 0;
             
             return {
                 _id: answer._id,
                 studentId: answer.solveBy._id,
                 userName: answer.solveBy.userName,
                 email: answer.solveBy.email,
-                answeredQuestions: answer.questionsNumber,
-                score: answer.total,
+                answeredQuestions: uniqueQuestions.length,
+                score: uniqueScore,
                 totalPossible: totalPoints,
                 timeSpent: answer.time || '0:00',
                 percentage: percentage,
