@@ -68,6 +68,37 @@ const getTeacherCompetitions = async (req, res) => {
     }
 };
 
+const sanitizeCompetitionQuestions = (competitionObj) => {
+    if (competitionObj && Array.isArray(competitionObj.questions)) {
+        competitionObj.questions.forEach(q => {
+            if (q.typeOfAnswer === 'MCQ' && Array.isArray(q.wrongAnswer)) {
+                const correctVal = String(q.correctAnswer || "").trim();
+                if (correctVal) {
+                    const normalizedWrong = q.wrongAnswer.map(e => String(e || "").trim());
+                    if (!normalizedWrong.includes(correctVal)) {
+                        q.wrongAnswer.push(q.correctAnswer);
+                    }
+                }
+                // Shuffle choices on the backend
+                q.wrongAnswer.sort(() => Math.random() - 0.5);
+                delete q.correctAnswer;
+            } else if (q.typeOfAnswer === 'Graph' && Array.isArray(q.wrongPicAnswer)) {
+                const correctPic = String(q.correctPicAnswer || "").trim();
+                if (correctPic) {
+                    const normalizedWrongPic = q.wrongPicAnswer.map(e => String(e || "").trim());
+                    if (!normalizedWrongPic.includes(correctPic)) {
+                        q.wrongPicAnswer.push(q.correctPicAnswer);
+                    }
+                }
+                // Shuffle choices on the backend
+                q.wrongPicAnswer.sort(() => Math.random() - 0.5);
+                delete q.correctPicAnswer;
+            }
+        });
+    }
+    return competitionObj;
+};
+
 // 3. Get detailed status of a competition (Lobby / Live / Scores)
 const getCompetitionDetails = async (req, res) => {
     try {
@@ -91,14 +122,19 @@ const getCompetitionDetails = async (req, res) => {
                 select: '-chapter'
             });
         } else {
-            // Student gets questions without correctAnswer
+            // Student gets questions with correctAnswer populated so backend can shuffle and sanitize them
             await competition.populate({
                 path: 'questions',
-                select: '-correctAnswer -chapter'
+                select: '-chapter'
             });
         }
 
-        res.json({ message: "success", competition });
+        let competitionObj = competition.toObject();
+        if (!isTeacher) {
+            competitionObj = sanitizeCompetitionQuestions(competitionObj);
+        }
+
+        res.json({ message: "success", competition: competitionObj });
     } catch (error) {
         res.status(502).json({ message: error.message });
     }

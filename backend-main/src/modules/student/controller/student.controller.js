@@ -202,11 +202,42 @@ const getAssignment = async (req, res) => {
     }
 }
 
+const sanitizeAssignmentQuestions = (assignmentObj) => {
+    if (assignmentObj && Array.isArray(assignmentObj.questions)) {
+        assignmentObj.questions.forEach(q => {
+            if (q.typeOfAnswer === 'MCQ' && Array.isArray(q.wrongAnswer)) {
+                const correctVal = String(q.correctAnswer || "").trim();
+                if (correctVal) {
+                    const normalizedWrong = q.wrongAnswer.map(e => String(e || "").trim());
+                    if (!normalizedWrong.includes(correctVal)) {
+                        q.wrongAnswer.push(q.correctAnswer);
+                    }
+                }
+                // Shuffle choices on the backend
+                q.wrongAnswer.sort(() => Math.random() - 0.5);
+                delete q.correctAnswer;
+            } else if (q.typeOfAnswer === 'Graph' && Array.isArray(q.wrongPicAnswer)) {
+                const correctPic = String(q.correctPicAnswer || "").trim();
+                if (correctPic) {
+                    const normalizedWrongPic = q.wrongPicAnswer.map(e => String(e || "").trim());
+                    if (!normalizedWrongPic.includes(correctPic)) {
+                        q.wrongPicAnswer.push(q.correctPicAnswer);
+                    }
+                }
+                // Shuffle choices on the backend
+                q.wrongPicAnswer.sort(() => Math.random() - 0.5);
+                delete q.correctPicAnswer;
+            }
+        });
+    }
+    return assignmentObj;
+};
+
 const getAssignmentDetails = async (req, res) => {
     try {
         const { assignmentID } = req.params
         const studentID = req.userData._id
-        let assignment = await assignmentModel.findById(assignmentID).select('-classes -createdBy').populate({ path: 'questions', select: '-correctAnswer -questionPicID -wrongAnswerID -chapter' })
+        let assignment = await assignmentModel.findById(assignmentID).select('-classes -createdBy').populate({ path: 'questions', select: '-questionPicID -wrongAnswerID -chapter' })
         if (assignment) {
             if (assignment.startDate) {
                 if (checkExpiration(assignment.startDate, assignment.endDate)) {
@@ -232,6 +263,7 @@ const getAssignmentDetails = async (req, res) => {
                     }).select('questions')
                     
                     assignment = assignment.toObject();
+                    assignment = sanitizeAssignmentQuestions(assignment);
                     
                     // Include attempt information in response
                     assignment.currentAttempt = currentAttemptNumber;
@@ -258,6 +290,7 @@ const getAssignmentDetails = async (req, res) => {
                 await assignment.save()
                 
                 assignment = assignment.toObject();
+                assignment = sanitizeAssignmentQuestions(assignment);
                 assignment.currentAttempt = 1;
                 assignment.totalAttempts = assignment.attemptsNumber;
                 assignment.remainingAttempts = assignment.attemptsNumber - 1;
