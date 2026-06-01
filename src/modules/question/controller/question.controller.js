@@ -372,7 +372,18 @@ const getSchoolQuestionReports = async (req, res) => {
         const schoolID = req.userData._id;
 
         const reports = await questionReportModel.find({ school: schoolID })
-            .populate('question')
+            .populate({
+                path: 'question',
+                populate: {
+                    path: 'chapter',
+                    populate: {
+                        path: 'unit',
+                        populate: {
+                            path: 'subject'
+                        }
+                    }
+                }
+            })
             .populate('reportedBy', 'userName email')
             .sort({ _id: -1 });
 
