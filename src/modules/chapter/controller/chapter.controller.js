@@ -32,6 +32,18 @@ const getChapterQuestion = async (req, res) => {
             }
         }
 
+        const chapterCheck = await chapterModel.findById(chapterID);
+        if (!chapterCheck) {
+            return res.json({ message: "This chapter is not found" });
+        }
+
+        // If it's a custom chapter, verify creator ownership
+        if (chapterCheck.createdBy) {
+            if (!userId || (String(chapterCheck.createdBy) !== String(userId) && userRole !== 'Admin')) {
+                return res.status(403).json({ message: "Unauthorized access to this custom worksheet" });
+            }
+        }
+
         // Determine question match condition:
         // 1. If admin, see everything
         // 2. If teacher, see global (createdBy is null/not exists) OR created by this teacher
@@ -154,4 +166,70 @@ const reorderQuestions = async (req, res) => {
     }
 }
 
-module.exports = { addChapter, getChapterQuestion, updateChapter, deleteChapter, reorderQuestions }
+const addCustomChapter = async (req, res) => {
+    try {
+        const { chapterName, format } = req.body;
+        if (!chapterName) {
+            return res.status(400).json({ message: "chapter name is required" });
+        }
+        const newChapter = new chapterModel({
+            chapterName,
+            format: format || 'MCQ',
+            createdBy: req.userData._id,
+            questions: []
+        });
+        const savedChapter = await newChapter.save();
+        res.json({ message: "success", chapter: savedChapter });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+const getCustomChapters = async (req, res) => {
+    try {
+        const chapters = await chapterModel.find({ createdBy: req.userData._id })
+            .populate('questions');
+        res.json({ message: "success", chapters });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+const deleteCustomChapter = async (req, res) => {
+    try {
+        const { chapterID } = req.params;
+        const chapter = await chapterModel.findOne({ _id: chapterID, createdBy: req.userData._id });
+        if (!chapter) {
+            return res.status(404).json({ message: "Chapter not found or unauthorized" });
+        }
+        
+        // Delete all questions associated with it
+        for (const qId of chapter.questions) {
+            const deleteQuestion = await questionModel.findByIdAndDelete(qId);
+            if (deleteQuestion) {
+                if (deleteQuestion.questionPicID) {
+                    await cloudinary.uploader.destroy(deleteQuestion.questionPicID);
+                }
+                if (deleteQuestion.answerPicID) {
+                    await cloudinary.uploader.destroy(deleteQuestion.answerPicID);
+                }
+            }
+        }
+        
+        await chapterModel.findByIdAndDelete(chapterID);
+        res.json({ message: "success" });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+module.exports = { 
+    addChapter, 
+    getChapterQuestion, 
+    updateChapter, 
+    deleteChapter, 
+    reorderQuestions,
+    addCustomChapter,
+    getCustomChapters,
+    deleteCustomChapter
+}
