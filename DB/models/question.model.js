@@ -37,6 +37,11 @@ const questionSchema = new mongoose.Schema({
     },
     answerPic: String,
     answerPicID: String,
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user",
+        default: null
+    },
 })
 
 const questionModel = mongoose.model('question', questionSchema)

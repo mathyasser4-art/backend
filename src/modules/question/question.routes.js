@@ -14,15 +14,15 @@ const {
     resolveQuestionReport
 } = require('./controller/question.controller')
 const upload = require('../../middleware/handleMulter')
-const { teacherAuth, schoolAuth } = require('../../middleware/auth')
+const { teacherAuth, schoolAuth, generalAuth } = require('../../middleware/auth')
 
-questionRouter.post('/question/addQuestion', upload.single("image"), addQuestion)
+questionRouter.post('/question/addQuestion', generalAuth, upload.single("image"), addQuestion)
 questionRouter.put('/question/updateAnswerPic/:questionID', upload.single("image"), updateAnswerPic)
-questionRouter.put('/question/updateQuestion/:questionID', upload.single("image"), updateQuestion)
+questionRouter.put('/question/updateQuestion/:questionID', generalAuth, upload.single("image"), updateQuestion)
 questionRouter.put('/question/addGraphQuestion/:questionID', upload.array("image"), addGraphQuestion)
 questionRouter.post('/question/checkTheAnswer/:questionID', checkTheAnswer)
 questionRouter.get('/question/getQuestionDetails/:questionID', getQuestionDetails)
-questionRouter.delete('/question/deleteQuestion/:questionID/:chapterID', deleteQuestion)
+questionRouter.delete('/question/deleteQuestion/:questionID/:chapterID', generalAuth, deleteQuestion)
 questionRouter.put('/question/updateAutoCorrect/:questionID', updateAutoCorrect)
 questionRouter.get('/question/level/:level', getQuestionsByLevel)
 

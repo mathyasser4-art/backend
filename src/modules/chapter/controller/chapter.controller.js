@@ -1,18 +1,71 @@
 const chapterModel = require('../../../../DB/models/chapter.model')
 const unitModel = require('../../../../DB/models/unit.model')
 const questionModel = require('../../../../DB/models/question.model')
+const userModel = require('../../../../DB/models/user.model')
+const jwt = require('jsonwebtoken')
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
 const mongoose = require('mongoose')
 
 const getChapterQuestion = async (req, res) => {
-    const { chapterID } = req.params
-    const chapter = await chapterModel.findById(chapterID).select("-unit").populate('questions', 'question questionPic questionPoints answerPic answer correctAnswer wrongAnswer autoCorrect typeOfAnswer wrongPicAnswer correctPicAnswer')
-    if (chapter) {
-        res.json({ message: "success", chapter })
-    } else {
-        res.json({ message: "This chapter is not found" })
+    try {
+        const { chapterID } = req.params
+        const { authrization } = req.headers;
+        
+        let userId = null;
+        let userRole = null;
+        
+        if (authrization) {
+            try {
+                if (authrization.startsWith(process.env.AUTH_SECRET_KEY)) {
+                    const userToken = authrization.split(process.env.AUTH_SECRET_KEY)[1]
+                    const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY)
+                    const userFounded = await userModel.findById(id)
+                    if (userFounded) {
+                        userId = userFounded._id;
+                        userRole = userFounded.role;
+                    }
+                }
+            } catch (err) {
+                // Ignore token error (e.g. expired or invalid), serve public questions
+            }
+        }
+
+        // Determine question match condition:
+        // 1. If admin, see everything
+        // 2. If teacher, see global (createdBy is null/not exists) OR created by this teacher
+        // 3. Otherwise (student/guest), see only global
+        let matchQuery = {
+            $or: [
+                { createdBy: null },
+                { createdBy: { $exists: false } }
+            ]
+        };
+
+        if (userId) {
+            if (userRole === 'Admin') {
+                matchQuery = {}; // Admin sees all
+            } else if (userRole === 'Teacher' || userRole === 'School' || userRole === 'IT') {
+                matchQuery.$or.push({ createdBy: userId });
+            }
+        }
+
+        const chapter = await chapterModel.findById(chapterID)
+            .select("-unit")
+            .populate({
+                path: 'questions',
+                match: matchQuery,
+                select: 'question questionPic questionPoints answerPic answer correctAnswer wrongAnswer autoCorrect typeOfAnswer wrongPicAnswer correctPicAnswer createdBy'
+            })
+
+        if (chapter) {
+            res.json({ message: "success", chapter })
+        } else {
+            res.json({ message: "This chapter is not found" })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
     }
 }
 

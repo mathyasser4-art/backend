@@ -24,10 +24,13 @@ const addQuestion = async (req, res) => {
                 req.body.questionPic = secure_url
                 req.body.questionPicID = public_id
             }
+            if (req.userData) {
+                req.body.createdBy = req.userData._id;
+            }
             const addQuestion = new questionModel(req.body)
             const questionData = await addQuestion.save()
             if (questionData) {
-                if (index == 'last') {
+                if (index === 'last' || !index) {
                     findChapter.questions.push(questionData._id)
                 } else {
                     findChapter.questions.splice(parseInt(index) + 1, 0, questionData._id);
@@ -128,6 +131,11 @@ const updateQuestion = async (req, res) => {
         const findQuestion = await questionModel.findById(questionID)
 
         if (findQuestion) {
+            if (req.userData && req.userData.role !== 'Admin') {
+                if (String(findQuestion.createdBy) !== String(req.userData._id)) {
+                    return res.status(403).json({ message: "You do not have permission to modify this question" })
+                }
+            }
             if (req.file) {
                 const imageURI = req.file.path;
                 const { secure_url, public_id } = await cloudinary.uploader.upload(imageURI, { folder: 'questionPic', resource_type: "image" });
@@ -212,6 +220,17 @@ const getQuestionDetails = async (req, res) => {
 const deleteQuestion = async (req, res) => {
     try {
         const { questionID, chapterID } = req.params
+        const findQuestion = await questionModel.findById(questionID)
+        if (!findQuestion) {
+            return res.json({ message: "this question is not available" });
+        }
+
+        if (req.userData && req.userData.role !== 'Admin') {
+            if (String(findQuestion.createdBy) !== String(req.userData._id)) {
+                return res.status(403).json({ message: "You do not have permission to delete this question" })
+            }
+        }
+
         const question = await questionModel.findByIdAndDelete(questionID)
         if (question) {
             if (question.questionPicID)
