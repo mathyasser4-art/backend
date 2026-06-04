@@ -6,7 +6,19 @@ const login = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const findUser = await userModel.findOne({ email });
+        if (!email || !password) {
+            return res.json({ message: 'Incorrect username or password' });
+        }
+
+        const query = {
+            $or: [
+                { email: email.toLowerCase() },
+                { userName: email },
+                { email: email }
+            ]
+        };
+
+        const findUser = await userModel.findOne(query).populate('createdBy');
         if (!findUser) {
             return res.json({ message: 'Incorrect username or password' });
         }
@@ -30,7 +42,8 @@ const login = async (req, res) => {
             userToken,
             userName: findUser.userName,
             role: findUser.role,
-            userID: findUser._id
+            userID: findUser._id,
+            createdBy: findUser.createdBy
         });
     } catch (error) {
         res.status(502).json({ message: error.message });
