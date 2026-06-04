@@ -1,11 +1,11 @@
 const classRouter = require('express').Router()
 const { addClass, getAllClass, updateClass, removeClass, getStudent } = require('./controller/class.controller')
-const { itAuth } = require('../../middleware/auth')
+const { itOrTeacherAuth } = require('../../middleware/auth')
 
-classRouter.post('/class/addClass', itAuth, addClass)
-classRouter.put('/class/updateClass/:classID', itAuth, updateClass)
-classRouter.get('/class/getAllClass', itAuth, getAllClass)
-classRouter.delete('/class/removeClass/:classID', itAuth, removeClass)
-classRouter.get('/class/getStudent/:classID', itAuth, getStudent)
+classRouter.post('/class/addClass', itOrTeacherAuth, addClass)
+classRouter.put('/class/updateClass/:classID', itOrTeacherAuth, updateClass)
+classRouter.get('/class/getAllClass', itOrTeacherAuth, getAllClass)
+classRouter.delete('/class/removeClass/:classID', itOrTeacherAuth, removeClass)
+classRouter.get('/class/getStudent/:classID', itOrTeacherAuth, getStudent)
 
 module.exports = classRouter

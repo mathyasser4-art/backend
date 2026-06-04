@@ -3,11 +3,24 @@ const userModel = require('../../../../DB/models/user.model')
 
 const addClass = async (req, res) => {
     try {
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
         req.body.school = schoolID
-        const addClass = new classModel(req.body)
-        await addClass.save()
-        const allClasses = await classModel.find({ school: schoolID })
+        if (req.userData.role == 'Teacher') {
+            req.body.teachers = [req.userData._id]
+        }
+        const addClassObj = new classModel(req.body)
+        await addClassObj.save()
+
+        if (req.userData.role == 'Teacher') {
+            await userModel.findByIdAndUpdate(req.userData._id, { $addToSet: { classList: addClassObj._id } })
+        }
+
+        let allClasses
+        if (req.userData.role == 'Teacher') {
+            allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
+        } else {
+            allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
+        }
         res.json({ message: "success", allClasses })
     } catch (error) {
         res.status(502).json({ message: error.message })
@@ -16,13 +29,14 @@ const addClass = async (req, res) => {
 
 const getAllClass = async (req, res) => {
     try {
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        const allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
-        if (allClasses.length != 0) {
-            res.json({ message: "success", allClasses })
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        let allClasses
+        if (req.userData.role == 'Teacher') {
+            allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
         } else {
-            res.json({ message: "There are no any classes now" })
+            allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
         }
+        res.json({ message: "success", allClasses })
     } catch (error) {
         res.status(502).json({ message: error.message })
     }
@@ -31,12 +45,20 @@ const getAllClass = async (req, res) => {
 const updateClass = async (req, res) => {
     try {
         const { classID } = req.params
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
+            if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
+                return res.json({ message: "You do not have access to modify this class" })
+            }
             const updateClass = await classModel.findByIdAndUpdate(classID, req.body)
             if (updateClass) {
-                const allClasses = await classModel.find({ school: schoolID })
+                let allClasses
+                if (req.userData.role == 'Teacher') {
+                    allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
+                } else {
+                    allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
+                }
                 res.json({ message: "success", allClasses })
             } else {
                 res.json({ message: "an error is happend" })
@@ -52,13 +74,22 @@ const updateClass = async (req, res) => {
 const removeClass = async (req, res) => {
     try {
         const { classID } = req.params
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
-            // await userModel.deleteMany({class: findClass._id})
+            if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
+                return res.json({ message: "You do not have access to remove this class" })
+            }
             const removeClass = await classModel.findByIdAndDelete(classID)
             if (removeClass) {
-                const allClasses = await classModel.find({ school: schoolID })
+                await userModel.updateMany({ classList: classID }, { $pull: { classList: classID } })
+                await userModel.updateMany({ class: classID }, { $unset: { class: 1 } })
+                let allClasses
+                if (req.userData.role == 'Teacher') {
+                    allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
+                } else {
+                    allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
+                }
                 res.json({ message: "success", allClasses })
             } else {
                 res.json({ message: "an error is happend" })
@@ -74,12 +105,20 @@ const removeClass = async (req, res) => {
 const getStudent = async (req, res) => {
     try {
         const { classID } = req.params
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        const allStudent = await userModel.find({ createdBy: schoolID, class: classID }).select('userName')
-        if (allStudent.length != 0) {
-            res.json({ message: "success", allStudent })
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const findClass = await classModel.findById(classID)
+        if (findClass) {
+            if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
+                return res.json({ message: "You do not have access to view this class's students" })
+            }
+            const allStudent = await userModel.find({ createdBy: schoolID, class: classID }).select('userName')
+            if (allStudent.length != 0) {
+                res.json({ message: "success", allStudent })
+            } else {
+                res.json({ message: "There are no any student yet." })
+            }
         } else {
-            res.json({ message: "There are no any student yet." })
+            res.json({ message: "There is no class with this id" })
         }
     } catch (error) {
         res.status(502).json({ message: error.message })
