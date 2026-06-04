@@ -49,6 +49,14 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "user"
     },
+    teacher:{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user"
+    },
+    maxStudents: {
+        type: Number,
+        default: 0
+    },
     verificationCode: String,
     resetPasswordCode: String,
 })

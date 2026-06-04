@@ -111,7 +111,11 @@ const getStudent = async (req, res) => {
             if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
                 return res.json({ message: "You do not have access to view this class's students" })
             }
-            const allStudent = await userModel.find({ createdBy: schoolID, class: classID }).select('userName')
+            const query = { createdBy: schoolID, class: classID }
+            if (req.userData.role === 'Teacher') {
+                query.teacher = req.userData._id
+            }
+            const allStudent = await userModel.find(query).select('userName')
             if (allStudent.length != 0) {
                 res.json({ message: "success", allStudent })
             } else {

@@ -12,8 +12,12 @@ const getStudent = async (req, res) => {
         const { pageNumber } = req.params
         const skippedNumber = (pageNumber - 1) * 20
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
-        const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
-        const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
+        const query = { role: "Student", createdBy: schoolID }
+        if (req.userData.role === 'Teacher') {
+            query.teacher = req.userData._id
+        }
+        const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+        const countStudent = await userModel.countDocuments(query);
         if (allStudent.length != 0) {
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
         } else {
@@ -32,6 +36,19 @@ const addStudent = async (req, res) => {
         if (findStudent) {
             res.json({ message: "This student name is already registered" })
         } else {
+            if (req.userData.role === 'Teacher') {
+                const maxStudents = req.userData.maxStudents;
+                if (maxStudents !== undefined && maxStudents !== null && maxStudents > 0) {
+                    const currentStudentCount = await userModel.countDocuments({
+                        role: "Student",
+                        createdBy: schoolID,
+                        teacher: req.userData._id
+                    });
+                    if (currentStudentCount >= maxStudents) {
+                        return res.json({ message: `You have reached your limit of ${maxStudents} students.` });
+                    }
+                }
+            }
             const { pageNumber } = req.params
             const skippedNumber = (pageNumber - 1) * 20
             try {
@@ -43,10 +60,17 @@ const addStudent = async (req, res) => {
             req.body.verify = true
             req.body.role = 'Student'
             req.body.createdBy = schoolID
+            if (req.userData.role === 'Teacher') {
+                req.body.teacher = req.userData._id
+            }
             const addStudent = new userModel(req.body)
             await addStudent.save()
-            const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
-            const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
+            const query = { role: "Student", createdBy: schoolID }
+            if (req.userData.role === 'Teacher') {
+                query.teacher = req.userData._id
+            }
+            const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+            const countStudent = await userModel.countDocuments(query);
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
         }
     } catch (error) {
@@ -57,6 +81,13 @@ const addStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        if (req.userData.role === 'Teacher') {
+            const verifyStudent = await userModel.findOne({ _id: studentID, role: "Student", createdBy: schoolID, teacher: req.userData._id })
+            if (!verifyStudent) {
+                return res.json({ message: "You do not have access to update this student" })
+            }
+        }
         if (req.body.password != undefined) {
             try {
                 const hashPassword = await bcrypt.hash(req.body.password, parseInt(process.env.SALTROUNDS))
@@ -68,9 +99,12 @@ const updateStudent = async (req, res) => {
         const updateStudent = await userModel.findByIdAndUpdate(studentID, req.body)
         if (updateStudent) {
             const skippedNumber = (pageNumber - 1) * 20
-            const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
-            const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
-            const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+            const query = { role: "Student", createdBy: schoolID }
+            if (req.userData.role === 'Teacher') {
+                query.teacher = req.userData._id
+            }
+            const countStudent = await userModel.countDocuments(query);
+            const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
         } else {
             res.json({ message: "This student is not found" })
@@ -83,7 +117,12 @@ const updateStudent = async (req, res) => {
 const deleteStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
-        const findStudent = await userModel.findById(studentID)
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const findStudentQuery = { _id: studentID }
+        if (req.userData.role === 'Teacher') {
+            findStudentQuery.teacher = req.userData._id
+        }
+        const findStudent = await userModel.findOne(findStudentQuery)
         if (findStudent) {
             const deleteStudent = await userModel.findByIdAndDelete(studentID)
             if (deleteStudent) {
@@ -99,9 +138,12 @@ const deleteStudent = async (req, res) => {
                 }
                 await answerModel.deleteMany({ solveBy: deleteStudent._id })
                 const skippedNumber = (pageNumber - 1) * 20
-                const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
-                const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
-                const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+                const query = { role: "Student", createdBy: schoolID }
+                if (req.userData.role === 'Teacher') {
+                    query.teacher = req.userData._id
+                }
+                const countStudent = await userModel.countDocuments(query);
+                const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
                 res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
             } else {
                 res.json({ message: "an error is happend" })
@@ -117,12 +159,20 @@ const deleteStudent = async (req, res) => {
 const removeStudentFromClass = async (req, res) => {
     try {
         const { studentID, classID } = req.params
-        const findStudent = await userModel.findById(studentID)
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const findStudentQuery = { _id: studentID }
+        if (req.userData.role === 'Teacher') {
+            findStudentQuery.teacher = req.userData._id
+        }
+        const findStudent = await userModel.findOne(findStudentQuery)
         if (findStudent) {
             const removeFromClass = await userModel.findByIdAndUpdate(studentID, { $unset: { class: 1 } })
             if (removeFromClass) {
-                const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
-                const allStudent = await userModel.find({ createdBy: schoolID, class: classID }).select('userName')
+                const query = { createdBy: schoolID, class: classID }
+                if (req.userData.role === 'Teacher') {
+                    query.teacher = req.userData._id
+                }
+                const allStudent = await userModel.find(query).select('userName')
                 res.json({ message: "success", allStudent })
             } else {
                 res.json({ message: "an error is happend" })
@@ -139,7 +189,11 @@ const search = async (req, res) => {
     try {
         const { searchKey } = req.params
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
-        let findStudent = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' })
+        const query = { 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }
+        if (req.userData.role === 'Teacher') {
+            query.teacher = req.userData._id
+        }
+        let findStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' })
         if (findStudent.length != 0) {
             res.json({ message: 'success', allStudent: findStudent })
         } else {

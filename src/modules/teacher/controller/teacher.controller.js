@@ -12,7 +12,7 @@ const getTeachers = async (req, res) => {
         const { pageNumber } = req.params
         const skippedNumber = (pageNumber - 1) * 20
         const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+        const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
         const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
         if (allTeachers.length != 0) {
             res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
@@ -46,7 +46,7 @@ const addTeacher = async (req, res) => {
             const addTeacher = new userModel(req.body)
             await addTeacher.save()
             const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
-            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
             res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
         }
     } catch (error) {
@@ -70,7 +70,7 @@ const updateTeacher = async (req, res) => {
             const skippedNumber = (pageNumber - 1) * 20
             const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
             const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
-            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
             res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
         } else {
             res.json({ message: "This teacher is not found" })
@@ -106,7 +106,7 @@ const deleteTeacher = async (req, res) => {
                 const skippedNumber = (pageNumber - 1) * 20
                 const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
                 const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
-                const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+                const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
                 res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
             } else {
                 res.json({ message: "an error is happend" })
@@ -181,7 +181,7 @@ const search = async (req, res) => {
     try {
         const { searchKey } = req.params
         const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        let findTeacher = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }])
+        let findTeacher = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }])
         if (findTeacher.length != 0) {
             res.json({ message: 'success', allTeachers: findTeacher })
         } else {
