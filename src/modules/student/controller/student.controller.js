@@ -11,7 +11,7 @@ const getStudent = async (req, res) => {
     try {
         const { pageNumber } = req.params
         const skippedNumber = (pageNumber - 1) * 20
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
         const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
         const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
         if (allStudent.length != 0) {
@@ -27,7 +27,7 @@ const getStudent = async (req, res) => {
 const addStudent = async (req, res) => {
     try {
         const { userName, password } = req.body
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
         const findStudent = await userModel.findOne({ userName, role: "Student", createdBy: schoolID })
         if (findStudent) {
             res.json({ message: "This student name is already registered" })
@@ -68,7 +68,7 @@ const updateStudent = async (req, res) => {
         const updateStudent = await userModel.findByIdAndUpdate(studentID, req.body)
         if (updateStudent) {
             const skippedNumber = (pageNumber - 1) * 20
-            const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+            const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
             const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
             const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
@@ -99,7 +99,7 @@ const deleteStudent = async (req, res) => {
                 }
                 await answerModel.deleteMany({ solveBy: deleteStudent._id })
                 const skippedNumber = (pageNumber - 1) * 20
-                const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+                const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
                 const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
                 const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
                 res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
@@ -121,7 +121,7 @@ const removeStudentFromClass = async (req, res) => {
         if (findStudent) {
             const removeFromClass = await userModel.findByIdAndUpdate(studentID, { $unset: { class: 1 } })
             if (removeFromClass) {
-                const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+                const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
                 const allStudent = await userModel.find({ createdBy: schoolID, class: classID }).select('userName')
                 res.json({ message: "success", allStudent })
             } else {
@@ -138,7 +138,7 @@ const removeStudentFromClass = async (req, res) => {
 const search = async (req, res) => {
     try {
         const { searchKey } = req.params
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
         let findStudent = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' })
         if (findStudent.length != 0) {
             res.json({ message: 'success', allStudent: findStudent })
