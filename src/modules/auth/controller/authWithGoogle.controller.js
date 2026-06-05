@@ -14,18 +14,7 @@ const authWithGoogle = async (req, res) => {
             if (email_verified == true) {
                 const findUser = await userModel.findOne({ email })
                 if (!findUser) {
-                    const { name } = data
-                    req.body.email = email
-                    req.body.userName = name
-                    req.body.verify = true
-                    const addUser = new userModel(req.body)
-                    const userData = await addUser.save()
-                    if (userData) {
-                        const userToken = jwt.sign({ id: userData._id }, process.env.TOKEN_SECRET_KEY);
-                        res.json({ message: 'success', userToken })
-                    } else {
-                        res.json({ message: 'Error... This account has not been registered to our servers. Please try again' })
-                    }
+                    res.status(400).json({ message: 'No account found with this email. Your account must be pre-created by your school or teacher before logging in.' })
                 } else {
                     const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
                     res.json({ message: 'success', userToken })
