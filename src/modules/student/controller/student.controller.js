@@ -11,7 +11,10 @@ const getStudent = async (req, res) => {
     try {
         const { pageNumber } = req.params
         const skippedNumber = (pageNumber - 1) * 20
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
+            return res.json({ message: "Your account is not linked to any school." })
+        }
         const query = { role: "Student", createdBy: schoolID }
         if (req.userData.role === 'Teacher') {
             query.teacher = req.userData._id
@@ -31,7 +34,10 @@ const getStudent = async (req, res) => {
 const addStudent = async (req, res) => {
     try {
         const { userName, password } = req.body
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
+            return res.json({ message: "Your account is not linked to any school. Please contact your school administrator to link your account before creating students." })
+        }
         const findStudent = await userModel.findOne({ userName, role: "Student", createdBy: schoolID })
         if (findStudent) {
             res.json({ message: "This student name is already registered" })
@@ -81,7 +87,10 @@ const addStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
+            return res.json({ message: "Your account is not linked to any school." })
+        }
         if (req.userData.role === 'Teacher') {
             const verifyStudent = await userModel.findOne({ _id: studentID, role: "Student", createdBy: schoolID, teacher: req.userData._id })
             if (!verifyStudent) {
@@ -117,7 +126,7 @@ const updateStudent = async (req, res) => {
 const deleteStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findStudentQuery = { _id: studentID }
         if (req.userData.role === 'Teacher') {
             findStudentQuery.teacher = req.userData._id
@@ -159,7 +168,7 @@ const deleteStudent = async (req, res) => {
 const removeStudentFromClass = async (req, res) => {
     try {
         const { studentID, classID } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findStudentQuery = { _id: studentID }
         if (req.userData.role === 'Teacher') {
             findStudentQuery.teacher = req.userData._id
@@ -188,7 +197,7 @@ const removeStudentFromClass = async (req, res) => {
 const search = async (req, res) => {
     try {
         const { searchKey } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const query = { 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }
         if (req.userData.role === 'Teacher') {
             query.teacher = req.userData._id
