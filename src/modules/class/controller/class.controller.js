@@ -3,7 +3,7 @@ const userModel = require('../../../../DB/models/user.model')
 
 const addClass = async (req, res) => {
     try {
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         req.body.school = schoolID
         if (req.userData.role == 'Teacher') {
             req.body.teachers = [req.userData._id]
@@ -29,7 +29,7 @@ const addClass = async (req, res) => {
 
 const getAllClass = async (req, res) => {
     try {
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         let allClasses
         if (req.userData.role == 'Teacher') {
             allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
@@ -45,7 +45,7 @@ const getAllClass = async (req, res) => {
 const updateClass = async (req, res) => {
     try {
         const { classID } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
             if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
@@ -74,7 +74,7 @@ const updateClass = async (req, res) => {
 const removeClass = async (req, res) => {
     try {
         const { classID } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
             if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
@@ -105,7 +105,7 @@ const removeClass = async (req, res) => {
 const getStudent = async (req, res) => {
     try {
         const { classID } = req.params
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
             if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
