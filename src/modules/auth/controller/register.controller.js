@@ -35,7 +35,8 @@ const register = async (req, res) => {
             password: hashedPassword,
             role: 'Teacher',
             createdBy: school._id,
-            maxStudents: 100
+            maxStudents: 100,
+            verify: true
         });
 
         await newTeacher.save();
