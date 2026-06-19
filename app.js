@@ -72,7 +72,7 @@ const CronJob = require('cron').CronJob;
 // --- LIVE DASHBOARD HEARTBEAT ---
 const activeSessions = new Map();
 
-app.post('/api/heartbeat', (req, res) => {
+app.post('/heartbeat', (req, res) => {
     try {
         const { sessionId, userId, role, userName } = req.body;
         if (sessionId) {
@@ -99,7 +99,7 @@ setInterval(() => {
     }
 }, 30000);
 
-app.get('/api/live-stats', (req, res) => {
+app.get('/live-stats', (req, res) => {
     try {
         const users = Array.from(activeSessions.values());
         res.json({
