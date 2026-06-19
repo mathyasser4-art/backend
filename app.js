@@ -69,6 +69,50 @@ app.use(authRouter, userRouter, systemRouter, questionTypeRouter, unitRouter, ch
 const request = require('request')
 const CronJob = require('cron').CronJob;
 
+// --- LIVE DASHBOARD HEARTBEAT ---
+const activeSessions = new Map();
+
+app.post('/api/heartbeat', (req, res) => {
+    try {
+        const { sessionId, userId, role, userName } = req.body;
+        if (sessionId) {
+            activeSessions.set(sessionId, {
+                timestamp: Date.now(),
+                userId: userId || null,
+                role: role || 'Visitor',
+                userName: userName || 'Anonymous'
+            });
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Cleanup inactive sessions every 30 seconds
+setInterval(() => {
+    const now = Date.now();
+    for (let [id, data] of activeSessions.entries()) {
+        if (now - data.timestamp > 60000) { // 60 seconds timeout
+            activeSessions.delete(id);
+        }
+    }
+}, 30000);
+
+app.get('/api/live-stats', (req, res) => {
+    try {
+        const users = Array.from(activeSessions.values());
+        res.json({
+            success: true,
+            totalVisitors: users.length,
+            users: users
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+// -------------------------------
+
 // Health check endpoint
 app.get('/health', async (req, res) => {
     const mongoose = require('mongoose');
