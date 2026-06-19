@@ -230,6 +230,16 @@ const getResult = async (req, res) => {
                                 await student.save();
                                 console.log(`Awarded ${coinsEarned} coins to student ${studentID}`);
                             }
+                            
+                            // Economy: Reward teacher for student completion
+                            if (assignment && assignment.createdBy) {
+                                const teacher = await userModel.findById(assignment.createdBy);
+                                if (teacher) {
+                                    teacher.coins = (teacher.coins || 0) + 10;
+                                    await teacher.save();
+                                    console.log(`Awarded 10 coins to teacher ${teacher._id} for student completion`);
+                                }
+                            }
                         }
                     }
                 } catch (err) {
