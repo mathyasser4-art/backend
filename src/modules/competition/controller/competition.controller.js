@@ -32,6 +32,17 @@ const createCompetition = async (req, res) => {
 
         await newCompetition.save();
 
+        // Economy: Reward teacher for creating a battle
+        try {
+            const teacherDoc = await userModel.findById(teacherID);
+            if (teacherDoc) {
+                teacherDoc.coins = (teacherDoc.coins || 0) + 50;
+                await teacherDoc.save();
+            }
+        } catch (err) {
+            console.error('Failed to reward teacher coins:', err);
+        }
+
         // Fetch teacher name to send in global pusher notification
         const teacher = await userModel.findById(teacherID).select('userName');
         const teacherName = teacher ? teacher.userName : "Your Teacher";
@@ -220,6 +231,17 @@ const startCompetition = async (req, res) => {
         competition.status = 'active';
         competition.startedAt = new Date();
         await competition.save();
+
+        // Economy: Reward teacher for starting a battle
+        try {
+            const teacherDoc = await userModel.findById(teacherID);
+            if (teacherDoc) {
+                teacherDoc.coins = (teacherDoc.coins || 0) + 150;
+                await teacherDoc.save();
+            }
+        } catch (err) {
+            console.error('Failed to reward teacher coins:', err);
+        }
 
         // Broadcast "start-competition" event with start config to all listening students
         await pusher.trigger(`competition-${competitionId}`, 'start-competition', {

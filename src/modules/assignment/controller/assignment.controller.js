@@ -13,6 +13,19 @@ const createAssignment = async (req, res) => {
         req.body.createdBy = teacherID
         const addAssignment = new assignmentModel(req.body)
         await addAssignment.save()
+        
+        // Economy: Reward teacher for creating an assignment
+        try {
+            const userModel = require('../../../../DB/models/user.model');
+            const teacher = await userModel.findById(teacherID);
+            if (teacher) {
+                teacher.coins = (teacher.coins || 0) + 100;
+                await teacher.save();
+            }
+        } catch (err) {
+            console.error('Failed to reward teacher coins:', err);
+        }
+        
         res.json({ message: "success" })
     } catch (error) {
         res.status(502).json({ message: error.message })

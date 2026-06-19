@@ -219,11 +219,17 @@ const getResult = async (req, res) => {
                     const userModel = require('../../../../DB/models/user.model');
                     const student = await userModel.findById(studentID);
                     if (student) {
-                        const coinsEarned = Math.floor(findAnswer.total) || 0;
-                        if (coinsEarned > 0) {
-                            student.coins = (student.coins || 0) + coinsEarned;
+                        if (student.role === 'Teacher' || student.role === 'School') {
+                            student.coins = (student.coins || 0) + 50;
                             await student.save();
-                            console.log(`Awarded ${coinsEarned} coins to student ${studentID}`);
+                            console.log(`Awarded 50 coins to teacher ${studentID} for practicing`);
+                        } else {
+                            const coinsEarned = Math.floor(findAnswer.total) || 0;
+                            if (coinsEarned > 0) {
+                                student.coins = (student.coins || 0) + coinsEarned;
+                                await student.save();
+                                console.log(`Awarded ${coinsEarned} coins to student ${studentID}`);
+                            }
                         }
                     }
                 } catch (err) {
