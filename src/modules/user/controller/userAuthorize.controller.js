@@ -5,7 +5,7 @@ const userAuthroize = async (req, res) => {
     try {
         const { userToken } = req.params
         const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY)
-        const findUser = await userModel.findById(id).select('userName email password role verify createdBy').populate({ path: 'createdBy', select: 'userName' })
+        const findUser = await userModel.findById(id).select('userName email password role verify createdBy coins unlockedItems currentAvatarBorder currentCarSkin currentTankSkin').populate({ path: 'createdBy', select: 'userName' })
         if (findUser) {
             if (findUser.verify) {
                 res.json({ message: 'success', userInfo: findUser })

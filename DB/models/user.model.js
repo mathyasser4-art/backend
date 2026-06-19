@@ -59,6 +59,26 @@ const userSchema = new mongoose.Schema({
     },
     verificationCode: String,
     resetPasswordCode: String,
+    coins: {
+        type: Number,
+        default: 0
+    },
+    unlockedItems: {
+        type: [String],
+        default: []
+    },
+    currentAvatarBorder: {
+        type: String,
+        default: null
+    },
+    currentCarSkin: {
+        type: String,
+        default: null
+    },
+    currentTankSkin: {
+        type: String,
+        default: null
+    }
 })
 
 const userModel = mongoose.model('user', userSchema)

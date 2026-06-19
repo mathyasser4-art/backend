@@ -311,6 +311,27 @@ const finishCompetition = async (req, res) => {
         }
 
         competition.status = 'finished';
+
+        // Economy: Award coins to top 3 participants
+        try {
+            const sortedParticipants = [...competition.participants].sort((a, b) => b.score - a.score);
+            const rewards = [50, 30, 10]; // 1st, 2nd, 3rd place rewards
+            
+            for (let i = 0; i < Math.min(sortedParticipants.length, 3); i++) {
+                const participant = sortedParticipants[i];
+                if (participant.score > 0) {
+                    const student = await userModel.findById(participant.student);
+                    if (student) {
+                        student.coins = (student.coins || 0) + rewards[i];
+                        await student.save();
+                        console.log(`Awarded ${rewards[i]} coins to student ${student._id} for placing #${i+1}`);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Failed to award competition coins:', err);
+        }
+
         await competition.save();
 
         // Broadcast ending event so clients transition to the podium/results screen
@@ -327,6 +348,29 @@ const triggerMathRacerEvent = async (req, res) => {
     try {
         const { channelName, eventName, eventData } = req.body;
         console.log(`[MATHRACER] Proxy trigger event: ${eventName} on channel: ${channelName}`);
+
+        // Economy: Award coins for finishing 1st, 2nd, 3rd in Math Racer or Tanks Game
+        if (eventName === 'mathracer-gameover' || eventName === 'tanks-gameover') {
+            if (eventData && eventData.ranks) {
+                const rewards = [50, 30, 10];
+                for (let i = 0; i < Math.min(eventData.ranks.length, 3); i++) {
+                    const studentId = eventData.ranks[i].id;
+                    if (studentId) {
+                        try {
+                            const student = await userModel.findById(studentId);
+                            if (student) {
+                                student.coins = (student.coins || 0) + rewards[i];
+                                await student.save();
+                                console.log(`Awarded ${rewards[i]} coins to student ${student._id} for placing #${i+1} in ${eventName}`);
+                            }
+                        } catch (err) {
+                            console.error(`Failed to award coins for ${eventName}:`, err);
+                        }
+                    }
+                }
+            }
+        }
+
         await pusher.trigger(channelName, eventName, eventData);
         res.json({ message: "success" });
     } catch (error) {

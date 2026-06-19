@@ -213,6 +213,22 @@ const getResult = async (req, res) => {
             // Mark completion time for this attempt
             if (!findAnswer.completedAt) {
                 findAnswer.completedAt = new Date();
+
+                // Economy: Award coins based on score
+                try {
+                    const userModel = require('../../../../DB/models/user.model');
+                    const student = await userModel.findById(studentID);
+                    if (student) {
+                        const coinsEarned = Math.floor(findAnswer.total) || 0;
+                        if (coinsEarned > 0) {
+                            student.coins = (student.coins || 0) + coinsEarned;
+                            await student.save();
+                            console.log(`Awarded ${coinsEarned} coins to student ${studentID}`);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to award coins:', err);
+                }
             }
 
             await findAnswer.save();

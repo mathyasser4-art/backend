@@ -5,6 +5,9 @@ const getUsers = require('./controller/getUsers.controller')
 const { resetPasswordCode, checkresetPasswordCode, resetPassword } = require('./controller/resetPassword.controller')
 const userAuthroize = require('./controller/userAuthorize.controller')
 
+const { getShopItems, buyItem, equipItem, tipStudent } = require('./controller/economy.controller')
+const auth = require('../../middleware/auth')
+
 userRouter.post('/user/resendVerificationCode', resendVerificationCode)
 userRouter.put('/user/verificationEmail', verificationEmail)
 userRouter.post('/user/resetPasswordCode', resetPasswordCode)
@@ -12,5 +15,11 @@ userRouter.put('/user/checkresetPasswordCode', checkresetPasswordCode)
 userRouter.put('/user/resetPassword', resetPassword)
 userRouter.get('/user/userAuthorize/:userToken', userAuthroize)
 userRouter.get('/user/get', getUsers)
+
+// Economy Endpoints
+userRouter.get('/user/shop', getShopItems)
+userRouter.post('/user/buyItem', auth(), buyItem)
+userRouter.post('/user/equipItem', auth(), equipItem)
+userRouter.post('/user/tipStudent', auth(), tipStudent)
 
 module.exports = userRouter
