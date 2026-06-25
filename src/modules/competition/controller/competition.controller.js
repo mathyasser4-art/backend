@@ -141,6 +141,17 @@ const getCompetitionDetails = async (req, res) => {
         }
 
         let competitionObj = competition.toObject();
+        if (competitionObj.participants && Array.isArray(competitionObj.participants)) {
+            competitionObj.participants.forEach(p => {
+                if (!p.student && p.guestId) {
+                    p.student = {
+                        _id: p.guestId,
+                        userName: p.guestName || "Guest",
+                        email: "Guest Account"
+                    };
+                }
+            });
+        }
         if (!isTeacher) {
             competitionObj = sanitizeCompetitionQuestions(competitionObj);
         }
@@ -154,10 +165,18 @@ const getCompetitionDetails = async (req, res) => {
 // 4. Student joins the competition lobby
 const joinCompetition = async (req, res) => {
     try {
-        const studentID = req.userData._id;
         const { competitionId } = req.params;
+        let studentID = req.userData ? req.userData._id : null;
+        let userName = req.userData ? req.userData.userName : null;
+        let isGuest = false;
 
-        console.log(`[JOIN] Student ${studentID} attempting to join competition ${competitionId}`);
+        if (!studentID) {
+            studentID = req.body.studentId || req.body.guestId || 'guest_' + Math.random().toString(36).substr(2, 9);
+            userName = req.body.userName || req.body.guestName || 'Guest';
+            isGuest = true;
+        }
+
+        console.log(`[JOIN] User ${studentID} (${userName}) attempting to join competition ${competitionId}`);
         console.log(`[JOIN] Request origin: ${req.headers.origin || 'unknown'}`);
         console.log(`[JOIN] Auth header present: ${!!req.headers.authrization}`);
 
@@ -174,32 +193,33 @@ const joinCompetition = async (req, res) => {
 
         // Check if student is already in the participants list
         const isAlreadyParticipant = competition.participants.some(
-            p => String(p.student) === String(studentID)
+            p => (p.student && String(p.student) === String(studentID)) || (p.guestId && String(p.guestId) === String(studentID))
         );
 
         if (!isAlreadyParticipant) {
-            competition.participants.push({ student: studentID, score: 0 });
+            if (isGuest) {
+                competition.participants.push({ guestId: studentID, guestName: userName, score: 0 });
+            } else {
+                competition.participants.push({ student: studentID, score: 0 });
+            }
             await competition.save();
-            console.log(`[JOIN] Student ${studentID} added to participants (total: ${competition.participants.length})`);
+            console.log(`[JOIN] User ${studentID} added to participants (total: ${competition.participants.length})`);
         } else {
-            console.log(`[JOIN] Student ${studentID} already in participants list`);
+            console.log(`[JOIN] User ${studentID} already in participants list`);
         }
-
-        // Fetch student details to broadcast to other lobby members
-        const studentDetails = await userModel.findById(studentID).select('userName email');
 
         // Broadcast "student-joined" event to the lobby channel
         try {
             const channelName = `competition-${competitionId}`;
             const eventData = {
-                studentId: String(studentDetails._id),
-                userName: studentDetails.userName
+                studentId: String(studentID),
+                userName: userName
             };
             console.log(`[JOIN] Triggering Pusher event on channel '${channelName}':`, JSON.stringify(eventData));
             await pusher.trigger(channelName, 'student-joined', eventData);
-            console.log(`[JOIN] Pusher event triggered successfully for ${studentDetails.userName}`);
+            console.log(`[JOIN] Pusher event triggered successfully for ${userName}`);
         } catch (pusherErr) {
-            console.error('[JOIN] Pusher trigger error:', pusherErr.message, pusherErr.statusCode, pusherErr.body);
+            console.error('[JOIN] Pusher trigger error:', pusherErr.message);
         }
 
         res.json({ message: "success", competition });
@@ -259,9 +279,15 @@ const startCompetition = async (req, res) => {
 // 6. Submit a live score update (Student only)
 const updateLiveScore = async (req, res) => {
     try {
-        const studentID = req.userData._id;
         const { competitionId } = req.params;
-        const { score, totalAnswered, wrongAnswers, finished, answers } = req.body;
+        const { score, totalAnswered, wrongAnswers, finished, answers, studentId, userName } = req.body;
+
+        let activeID = req.userData ? req.userData._id : (studentId || req.body.guestId);
+        let activeName = req.userData ? req.userData.userName : (userName || req.body.guestName || 'Guest');
+
+        if (!activeID) {
+            return res.status(403).json({ message: "User identification missing" });
+        }
 
         const competition = await competitionModel.findById(competitionId);
         if (!competition) {
@@ -276,7 +302,7 @@ const updateLiveScore = async (req, res) => {
 
         // Update score of the student in database
         const participant = competition.participants.find(
-            p => String(p.student) === String(studentID)
+            p => (p.student && String(p.student) === String(activeID)) || (p.guestId && String(p.guestId) === String(activeID))
         );
 
         if (!participant) {
@@ -296,12 +322,10 @@ const updateLiveScore = async (req, res) => {
         competition.markModified('participants');
         await competition.save();
 
-        const studentDetails = await userModel.findById(studentID).select('userName');
-
         // Broadcast score update to real-time scoreboard channel
         await pusher.trigger(`competition-${competitionId}`, 'score-updated', {
-            studentId: studentID,
-            userName: studentDetails.userName,
+            studentId: String(activeID),
+            userName: activeName,
             score: participant.score,
             totalAnswered: participant.totalAnswered,
             wrongAnswers: participant.wrongAnswers,

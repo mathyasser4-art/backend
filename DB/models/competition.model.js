@@ -32,6 +32,12 @@ const competitionSchema = new mongoose.Schema({
                 type: mongoose.Schema.Types.ObjectId, 
                 ref: "user" 
             },
+            guestId: {
+                type: String
+            },
+            guestName: {
+                type: String
+            },
             score: { 
                 type: Number, 
                 default: 0 
