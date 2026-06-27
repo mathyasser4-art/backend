@@ -361,10 +361,22 @@ const finishCompetition = async (req, res) => {
         }
 
         competition.status = 'finished';
+        const now = new Date();
+        if (competition.participants && competition.participants.length > 0) {
+            competition.participants.forEach(p => {
+                if (!p.finishedAt) {
+                    p.finishedAt = now;
+                }
+            });
+            competition.markModified('participants');
+        }
 
         // Economy: Award coins to top 3 participants
         try {
-            const sortedParticipants = [...competition.participants].sort((a, b) => b.score - a.score);
+            const sortedParticipants = [...competition.participants].sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return new Date(a.finishedAt) - new Date(b.finishedAt);
+            });
             const rewards = [50, 30, 10]; // 1st, 2nd, 3rd place rewards
             
             for (let i = 0; i < Math.min(sortedParticipants.length, 3); i++) {
@@ -385,7 +397,7 @@ const finishCompetition = async (req, res) => {
         await competition.save();
 
         // Broadcast ending event so clients transition to the podium/results screen
-        await pusher.trigger(`competition-${competitionId}`, 'competition-finished', {});
+        await pusher.trigger(`competition-${competitionId}`, 'competition-finished', { competition });
 
         res.json({ message: "success", competition });
     } catch (error) {
