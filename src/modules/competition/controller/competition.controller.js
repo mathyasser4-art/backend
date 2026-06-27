@@ -52,7 +52,8 @@ const createCompetition = async (req, res) => {
             await pusher.trigger('global-battle-arena', 'battle-created', {
                 competitionId: String(newCompetition._id),
                 title: newCompetition.title,
-                teacherName: teacherName
+                teacherName: teacherName,
+                teacherId: String(teacherID)
             });
             console.log(`[BROADCAST] Triggered battle-created globally for lobby ${newCompetition._id}`);
         } catch (pusherErr) {
@@ -170,7 +171,10 @@ const joinCompetition = async (req, res) => {
         let userName = req.userData ? req.userData.userName : null;
         let isGuest = false;
 
-        if (!studentID) {
+        if (req.userData && req.userData.role === 'Teacher' && req.body.studentId) {
+            studentID = req.body.studentId;
+            userName = req.body.userName || req.body.guestName || 'Student';
+        } else if (!studentID) {
             studentID = req.body.studentId || req.body.guestId || 'guest_' + Math.random().toString(36).substr(2, 9);
             userName = req.body.userName || req.body.guestName || 'Guest';
             isGuest = true;
