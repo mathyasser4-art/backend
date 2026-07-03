@@ -110,8 +110,6 @@ const duplicateAssignment = async (req, res) => {
             title: req.body.title,
             timer: req.body.timer,
             attemptsNumber: req.body.attemptsNumber || 1,
-            startDate: req.body.startDate,
-            endDate: req.body.endDate,
             classes: req.body.classes,
             
             // New metadata

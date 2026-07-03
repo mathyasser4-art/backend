@@ -1,7 +1,7 @@
 const userModel = require('../../../../DB/models/user.model')
 const assignmentModel = require('../../../../DB/models/assignment.model')
 const answerModel = require('../../../../DB/models/answer.model')
-const checkExpiration = require('../../../services/checkExpiration')
+
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
@@ -315,12 +315,6 @@ const getAssignmentDetails = async (req, res) => {
         const studentID = req.userData._id
         let assignment = await assignmentModel.findById(assignmentID).select('-classes -createdBy').populate({ path: 'questions', select: '-questionPicID -wrongAnswerID -chapter' })
         if (assignment) {
-            if (assignment.startDate) {
-                if (checkExpiration(assignment.startDate, assignment.endDate)) {
-                    res.json({ message: "Oops!!You can't open this assignment, it has expired." })
-                    return;
-                }
-            }
             const findStudent = assignment.students?.filter(e => String(e.solveBy) == String(studentID))[0]
             if (findStudent) {
                 if (findStudent.attempts >= assignment.attemptsNumber) {

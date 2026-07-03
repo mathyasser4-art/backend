@@ -250,7 +250,7 @@ const getStudentHistory = async (req, res) => {
             .populate({
                 path: 'assignment',
                 match: { createdBy: teacherID },
-                select: 'title totalPoints createdAt startDate endDate'
+                select: 'title totalPoints createdAt'
             })
             .sort({ _id: -1 })
 
