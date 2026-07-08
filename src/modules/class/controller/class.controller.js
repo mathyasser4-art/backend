@@ -5,6 +5,12 @@ const bcrypt = require('bcryptjs')
 const addClass = async (req, res) => {
     try {
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        
+        const existingClass = await classModel.findOne({ class: req.body.class, school: schoolID })
+        if (existingClass) {
+            return res.json({ message: "This class name already exists" })
+        }
+
         req.body.school = schoolID
         if (req.userData.role == 'Teacher') {
             req.body.teachers = [req.userData._id]
