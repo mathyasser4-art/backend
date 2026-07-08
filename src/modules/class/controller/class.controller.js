@@ -18,7 +18,7 @@ const addClass = async (req, res) => {
 
         try {
             const hashPassword = await bcrypt.hash('1234', parseInt(process.env.SALTROUNDS) || 10)
-            const newStudent = new userModel({
+            const studentData = {
                 userName: addClassObj.class,
                 email: `${addClassObj.class.replace(/\s+/g, '')}_${addClassObj._id}@student.com`,
                 password: hashPassword,
@@ -27,7 +27,13 @@ const addClass = async (req, res) => {
                 verify: true,
                 disable: false,
                 createdBy: schoolID
-            })
+            };
+            if (req.userData.role === 'Teacher') {
+                studentData.teacher = req.userData._id;
+            } else if (req.body.teachers && req.body.teachers.length > 0) {
+                studentData.teacher = req.body.teachers[0];
+            }
+            const newStudent = new userModel(studentData)
             await newStudent.save()
         } catch (studentErr) {
             console.error("Failed to auto-create student for class:", studentErr)
