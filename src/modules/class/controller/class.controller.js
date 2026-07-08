@@ -1,5 +1,6 @@
 const classModel = require('../../../../DB/models/class.model')
 const userModel = require('../../../../DB/models/user.model')
+const bcrypt = require('bcryptjs')
 
 const addClass = async (req, res) => {
     try {
@@ -13,6 +14,23 @@ const addClass = async (req, res) => {
 
         if (req.userData.role == 'Teacher') {
             await userModel.findByIdAndUpdate(req.userData._id, { $addToSet: { classList: addClassObj._id } })
+        }
+
+        try {
+            const hashPassword = await bcrypt.hash('1234', parseInt(process.env.SALTROUNDS) || 10)
+            const newStudent = new userModel({
+                userName: addClassObj.class,
+                email: `${addClassObj.class.replace(/\s+/g, '')}_${addClassObj._id}@student.com`,
+                password: hashPassword,
+                role: 'Student',
+                class: addClassObj._id,
+                verify: true,
+                disable: false,
+                createdBy: schoolID
+            })
+            await newStudent.save()
+        } catch (studentErr) {
+            console.error("Failed to auto-create student for class:", studentErr)
         }
 
         let allClasses
