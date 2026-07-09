@@ -63,4 +63,25 @@ const deleteSystem = async (req, res) => {
     }
 }
 
-module.exports = { addSystem, getAllSystem, updateSystem, deleteSystem }
+const reorderSubjects = async (req, res) => {
+    try {
+        const { systemID } = req.params
+        const { subjects } = req.body // Expecting an array of subject IDs
+        
+        if (!Array.isArray(subjects)) {
+            return res.status(400).json({ message: 'subjects must be an array' })
+        }
+        
+        const updatedSystem = await systemModel.findByIdAndUpdate(systemID, { subjects }, { new: true })
+        if (updatedSystem) {
+            const allSystem = await systemModel.find().populate('subjects')
+            res.json({ message: 'success', allSystem })
+        } else {
+            res.json({ message: 'This system is not found' })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
+    }
+}
+
+module.exports = { addSystem, getAllSystem, updateSystem, deleteSystem, reorderSubjects }
