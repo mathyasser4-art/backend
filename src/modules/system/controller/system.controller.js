@@ -48,4 +48,19 @@ const updateSystem = async (req, res) => {
     }
 }
 
-module.exports = { addSystem, getAllSystem, updateSystem }
+const deleteSystem = async (req, res) => {
+    try {
+        const { systemID } = req.params
+        const findSystem = await systemModel.findByIdAndDelete(systemID)
+        if (findSystem) {
+            const allSystem = await systemModel.find().populate('subjects')
+            res.json({ message: "success", allSystem })
+        } else {
+            res.json({ message: "There is no system with this id." })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
+    }
+}
+
+module.exports = { addSystem, getAllSystem, updateSystem, deleteSystem }

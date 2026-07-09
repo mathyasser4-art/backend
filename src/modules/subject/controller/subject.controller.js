@@ -44,4 +44,20 @@ const updateSubject = async (req, res) => {
     }
 }
 
-module.exports = { addSubject, updateSubject }
+const deleteSubject = async (req, res) => {
+    try {
+        const { subjectID } = req.params
+        const findSubject = await subjectModel.findByIdAndDelete(subjectID)
+        if (findSubject) {
+            await systemModel.updateMany({}, { $pull: { subjects: subjectID } })
+            const allSystem = await systemModel.find().populate('subjects')
+            res.json({ message: "success", allSystem })
+        } else {
+            res.json({ message: "There is no subject with this id" })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
+    }
+}
+
+module.exports = { addSubject, updateSubject, deleteSubject }
