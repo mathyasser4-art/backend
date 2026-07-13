@@ -52,25 +52,31 @@ const createCompetition = async (req, res) => {
         }
 
         // Fetch teacher name and school reference to send in global pusher notification
-        const teacher = await userModel.findById(teacherID).select('userName createdBy').populate('createdBy', 'userName');
+        const teacher = await userModel.findById(teacherID).select('userName createdBy role').populate('createdBy', 'userName');
         const teacherName = teacher ? teacher.userName : "Your Teacher";
-        const schoolId = teacher && teacher.createdBy ? String(teacher.createdBy._id || teacher.createdBy) : null;
-        const schoolName = teacher && teacher.createdBy ? teacher.createdBy.userName : null;
+        
+        let schoolId = null;
+        let schoolName = null;
+        if (teacher) {
+            if (teacher.role === 'School' || teacher.role === 'Admin' || teacher.role === 'IT') {
+                schoolId = String(teacher._id);
+                schoolName = teacher.userName;
+            } else if (teacher.createdBy) {
+                schoolId = String(teacher.createdBy._id || teacher.createdBy);
+                schoolName = teacher.createdBy.userName;
+            }
+        }
 
         // Trigger real-time global battle notification for active students
         try {
-            await pusher.trigger({
-                channel: 'global-battle-arena',
-                name: 'battle-created',
-                data: JSON.stringify({
+            await pusher.trigger('global-battle-arena', 'battle-created', JSON.stringify({
                     competitionId: String(newCompetition._id),
                     title: newCompetition.title,
                     teacherName: teacherName,
                     teacherId: String(teacherID),
                     schoolId: schoolId,
                     schoolName: schoolName
-                })
-            });
+                }));
             console.log(`[BROADCAST] Triggered battle-created globally for lobby ${newCompetition._id}`);
         } catch (pusherErr) {
             console.error('[BROADCAST] Global Pusher trigger error:', pusherErr.message);
@@ -236,11 +242,7 @@ const joinCompetition = async (req, res) => {
                 userName: userName
             };
             console.log(`[JOIN] Triggering Pusher event on channel '${channelName}':`, JSON.stringify(eventData));
-            await pusher.trigger({
-                channel: channelName,
-                name: 'student-joined',
-                data: JSON.stringify(eventData)
-            });
+            await pusher.trigger(channelName, 'student-joined', JSON.stringify(eventData));
             console.log(`[JOIN] Pusher event triggered successfully for ${userName}`);
         } catch (pusherErr) {
             console.error('[JOIN] Pusher trigger error:', pusherErr.message);
@@ -288,15 +290,11 @@ const startCompetition = async (req, res) => {
         }
 
         // Broadcast "start-competition" event with start config to all listening students
-        await pusher.trigger({
-            channel: `competition-${competitionId}`,
-            name: 'start-competition',
-            data: JSON.stringify({
+        await pusher.trigger(`competition-${competitionId}`, 'start-competition', JSON.stringify({
                 startedAt: competition.startedAt,
                 timer: competition.timer,
                 questionsCount: competition.questions.length
-            })
-        });
+            }));
 
         res.json({ message: "success", competition });
     } catch (error) {
@@ -406,10 +404,7 @@ const updateLiveScore = async (req, res) => {
         await competition.save();
 
         // Broadcast score update to real-time scoreboard channel
-        await pusher.trigger({
-            channel: `competition-${competitionId}`,
-            name: 'score-updated',
-            data: JSON.stringify({
+        await pusher.trigger(`competition-${competitionId}`, 'score-updated', JSON.stringify({
                 studentId: String(activeID),
                 userName: activeName,
                 score: participant.score,
@@ -418,8 +413,7 @@ const updateLiveScore = async (req, res) => {
                 finished: !!finished,
                 finishedAt: participant.finishedAt,
                 answers: participant.answers
-            })
-        });
+            }));
 
         res.json({ message: "success", answers: participant.answers });
     } catch (error) {
@@ -495,11 +489,7 @@ const finishCompetition = async (req, res) => {
         await competition.save();
 
         // Broadcast ending event so clients transition to the podium/results screen
-        await pusher.trigger({
-            channel: `competition-${competitionId}`,
-            name: 'competition-finished',
-            data: JSON.stringify({ competition })
-        });
+        await pusher.trigger(`competition-${competitionId}`, 'competition-finished', JSON.stringify({ competition }));
 
         res.json({ message: "success", competition });
     } catch (error) {
@@ -535,11 +525,7 @@ const triggerMathRacerEvent = async (req, res) => {
             }
         }
 
-        await pusher.trigger({
-            channel: channelName,
-            name: eventName,
-            data: typeof eventData === 'string' ? eventData : JSON.stringify(eventData)
-        });
+        await pusher.trigger(channelName, eventName, typeof eventData === 'string' ? eventData : JSON.stringify(eventData));
         res.json({ message: "success" });
     } catch (error) {
         console.error('[MATHRACER] Proxy trigger error:', error.message);
