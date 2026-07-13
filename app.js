@@ -71,6 +71,7 @@ const CronJob = require('cron').CronJob;
 
 // --- LIVE DASHBOARD HEARTBEAT ---
 const activeSessions = new Map();
+const DailyVisit = require('./DB/models/dailyVisit.model.js');
 
 app.post('/heartbeat', (req, res) => {
     try {
@@ -83,6 +84,17 @@ app.post('/heartbeat', (req, res) => {
                 userName: userName || 'Anonymous'
             });
         }
+        
+        // Record historical visit for authenticated users
+        if (userId && role && role !== 'Visitor') {
+            const dateStr = new Date().toISOString().split('T')[0];
+            DailyVisit.updateOne(
+                { date: dateStr, userId: userId },
+                { $set: { role, userName, lastSeen: new Date() } },
+                { upsert: true }
+            ).catch(err => console.error("Error logging daily visit:", err));
+        }
+
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -106,6 +118,20 @@ app.get('/live-stats', (req, res) => {
             success: true,
             totalVisitors: users.length,
             users: users
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/historical-stats', async (req, res) => {
+    try {
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        const visits = await DailyVisit.find({ date }).sort({ lastSeen: -1 });
+        res.json({
+            success: true,
+            date: date,
+            users: visits
         });
     } catch (error) {
         res.status(500).json({ error: error.message });

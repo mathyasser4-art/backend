@@ -11,6 +11,15 @@ const pusher = new Pusher({
   useTLS: true
 });
 
+// Normalise Eastern Arabic digits (٠١٢٣٤٥٦٧٨٩) → Western (0–9)
+const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
+const normalizeDigits = (str) => {
+    if (!str) return str
+    return String(str)
+        .replace(/[٠١٢٣٤٥٦٧٨٩]/g, d => ARABIC_DIGITS.indexOf(d).toString())
+        .trim()
+}
+
 // 1. Create a new competition lobby (Teacher only)
 const createCompetition = async (req, res) => {
     try {
@@ -43,9 +52,10 @@ const createCompetition = async (req, res) => {
             console.error('Failed to reward teacher coins:', err);
         }
 
-        // Fetch teacher name to send in global pusher notification
-        const teacher = await userModel.findById(teacherID).select('userName');
+        // Fetch teacher name and school reference to send in global pusher notification
+        const teacher = await userModel.findById(teacherID).select('userName createdBy');
         const teacherName = teacher ? teacher.userName : "Your Teacher";
+        const schoolId = teacher && teacher.createdBy ? String(teacher.createdBy) : null;
 
         // Trigger real-time global battle notification for active students
         try {
@@ -53,7 +63,8 @@ const createCompetition = async (req, res) => {
                 competitionId: String(newCompetition._id),
                 title: newCompetition.title,
                 teacherName: teacherName,
-                teacherId: String(teacherID)
+                teacherId: String(teacherID),
+                schoolId: schoolId
             });
             console.log(`[BROADCAST] Triggered battle-created globally for lobby ${newCompetition._id}`);
         } catch (pusherErr) {
@@ -293,7 +304,7 @@ const updateLiveScore = async (req, res) => {
             return res.status(403).json({ message: "User identification missing" });
         }
 
-        const competition = await competitionModel.findById(competitionId);
+        const competition = await competitionModel.findById(competitionId).populate('questions');
         if (!competition) {
             return res.status(404).json({ message: "Competition not found" });
         }
@@ -302,6 +313,14 @@ const updateLiveScore = async (req, res) => {
         // who finish just as the teacher ends the battle can still save their final score
         if (competition.status !== 'active' && competition.status !== 'finished') {
             return res.status(400).json({ message: "Competition is not active" });
+        }
+        
+        // Timer validation: if timer has expired (with a 10-second grace period for network latency), don't allow updates unless already finished.
+        if (competition.startedAt && competition.timer && competition.status === 'active') {
+             const elapsedSeconds = (Date.now() - new Date(competition.startedAt).getTime()) / 1000;
+             if (elapsedSeconds > competition.timer + 10) {
+                 return res.status(400).json({ message: "Competition time has expired." });
+             }
         }
 
         // Update score of the student in database
@@ -313,14 +332,61 @@ const updateLiveScore = async (req, res) => {
             return res.status(403).json({ message: "You are not a registered participant in this competition" });
         }
 
-        participant.score = score !== undefined ? score : participant.score;
-        participant.totalAnswered = totalAnswered !== undefined ? totalAnswered : participant.totalAnswered;
-        participant.wrongAnswers = wrongAnswers !== undefined ? wrongAnswers : participant.wrongAnswers;
+        // SECURE SCORING: Calculate score from answers against database
+        let secureScore = 0;
+        let secureTotalAnswered = 0;
+        let secureWrongAnswers = 0;
+        let secureAnswers = [];
+
+        if (answers && Array.isArray(answers)) {
+            answers.forEach(submittedAns => {
+                const q = competition.questions.find(dbQ => String(dbQ._id) === String(submittedAns.question));
+                if (q && submittedAns.studentAnswer !== undefined && submittedAns.studentAnswer !== "") {
+                    secureTotalAnswered++;
+                    let isCorrect = false;
+
+                    const studentAnsStr = normalizeDigits(submittedAns.studentAnswer);
+                    
+                    if (q.typeOfAnswer === 'Essay') {
+                        if (q.answer && q.answer.map(normalizeDigits).includes(studentAnsStr)) {
+                            isCorrect = true;
+                        }
+                    } else if (q.typeOfAnswer === 'MCQ') {
+                        if (normalizeDigits(q.correctAnswer) === studentAnsStr) {
+                            isCorrect = true;
+                        }
+                    } else if (q.typeOfAnswer === 'Graph') {
+                        if (q.correctPicAnswer === submittedAns.studentAnswer) {
+                            isCorrect = true;
+                        }
+                    }
+
+                    if (isCorrect) {
+                        secureScore++;
+                    } else {
+                        secureWrongAnswers++;
+                    }
+
+                    secureAnswers.push({
+                        question: q._id,
+                        studentAnswer: submittedAns.studentAnswer,
+                        isCorrect: isCorrect
+                    });
+                }
+            });
+            participant.score = secureScore;
+            participant.totalAnswered = secureTotalAnswered;
+            participant.wrongAnswers = secureWrongAnswers;
+            participant.answers = secureAnswers;
+        } else {
+            // Keep existing logic if no answers array provided
+            participant.score = score !== undefined ? score : participant.score;
+            participant.totalAnswered = totalAnswered !== undefined ? totalAnswered : participant.totalAnswered;
+            participant.wrongAnswers = wrongAnswers !== undefined ? wrongAnswers : participant.wrongAnswers;
+        }
+
         if (finished && !participant.finishedAt) {
             participant.finishedAt = new Date();
-        }
-        if (answers !== undefined) {
-            participant.answers = answers;
         }
 
         competition.markModified('participants');
@@ -338,7 +404,7 @@ const updateLiveScore = async (req, res) => {
             answers: participant.answers
         });
 
-        res.json({ message: "success" });
+        res.json({ message: "success", answers: participant.answers });
     } catch (error) {
         res.status(502).json({ message: error.message });
     }
@@ -375,7 +441,22 @@ const finishCompetition = async (req, res) => {
         try {
             const sortedParticipants = [...competition.participants].sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
-                return new Date(a.finishedAt) - new Date(b.finishedAt);
+                
+                const aFinished = !!a.finishedAt;
+                const bFinished = !!b.finishedAt;
+                if (aFinished && !bFinished) return -1;
+                if (!aFinished && bFinished) return 1;
+                
+                if (aFinished && bFinished) {
+                    const timeDiff = new Date(a.finishedAt) - new Date(b.finishedAt);
+                    if (timeDiff !== 0) return timeDiff;
+                }
+                
+                const aWrong = a.wrongAnswers || 0;
+                const bWrong = b.wrongAnswers || 0;
+                if (aWrong !== bWrong) return aWrong - bWrong;
+                
+                return (b.totalAnswered || 0) - (a.totalAnswered || 0);
             });
             const rewards = [50, 30, 10]; // 1st, 2nd, 3rd place rewards
             
