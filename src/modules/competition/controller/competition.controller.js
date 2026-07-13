@@ -52,9 +52,10 @@ const createCompetition = async (req, res) => {
         }
 
         // Fetch teacher name and school reference to send in global pusher notification
-        const teacher = await userModel.findById(teacherID).select('userName createdBy');
+        const teacher = await userModel.findById(teacherID).select('userName createdBy').populate('createdBy', 'userName');
         const teacherName = teacher ? teacher.userName : "Your Teacher";
-        const schoolId = teacher && teacher.createdBy ? String(teacher.createdBy) : null;
+        const schoolId = teacher && teacher.createdBy ? String(teacher.createdBy._id || teacher.createdBy) : null;
+        const schoolName = teacher && teacher.createdBy ? teacher.createdBy.userName : null;
 
         // Trigger real-time global battle notification for active students
         try {
@@ -66,7 +67,8 @@ const createCompetition = async (req, res) => {
                     title: newCompetition.title,
                     teacherName: teacherName,
                     teacherId: String(teacherID),
-                    schoolId: schoolId
+                    schoolId: schoolId,
+                    schoolName: schoolName
                 })
             });
             console.log(`[BROADCAST] Triggered battle-created globally for lobby ${newCompetition._id}`);
