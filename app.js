@@ -90,7 +90,10 @@ app.post('/heartbeat', (req, res) => {
             const dateStr = new Date().toISOString().split('T')[0];
             DailyVisit.updateOne(
                 { date: dateStr, userId: userId },
-                { $set: { role, userName, lastSeen: new Date() } },
+                { 
+                    $set: { role, userName, lastSeen: new Date() },
+                    $setOnInsert: { firstSeen: new Date() }
+                },
                 { upsert: true }
             ).catch(err => console.error("Error logging daily visit:", err));
         }

@@ -19,6 +19,10 @@ const dailyVisitSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    firstSeen: {
+        type: Date,
+        default: Date.now
+    },
     lastSeen: {
         type: Date,
         default: Date.now
