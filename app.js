@@ -27,6 +27,7 @@ const whitelist = [
   'http://localhost:3001',
   'http://localhost:3005',
   'http://localhost',
+  'https://localhost',
   'capacitor://localhost'
 ];
 
