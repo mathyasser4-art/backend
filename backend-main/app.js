@@ -24,7 +24,9 @@ const whitelist = [
   'https://dashboard-alpha-woad-54.vercel.app',
   'https://dashboard-33v3lnkua-abacusheroes-projects.vercel.app',
   'http://localhost:3000',
-  'http://localhost:3001'
+  'http://localhost:3001',
+  'http://localhost',
+  'capacitor://localhost'
 ];
 
 const corsOptions = {
