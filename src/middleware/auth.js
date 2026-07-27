@@ -1,5 +1,6 @@
 const userModel = require('../../DB/models/user.model')
 const jwt = require('jsonwebtoken');
+const { checkAndApplyTopsorobanTrial } = require('../services/topsorobanTrial.service');
 
 const userAuth = async (req, res, next) => {
     try {
@@ -87,6 +88,10 @@ const teacherAuth = async (req, res, next) => {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
                             if (userFounded.role == 'Teacher' && userFounded.disable == false) {
+                                const trialResult = await checkAndApplyTopsorobanTrial(userFounded);
+                                if (trialResult.isExpired) {
+                                    return res.json({ message: trialResult.message || 'Your account has been disabled due to trial expiration.' });
+                                }
                                 req.userData = userFounded
                                 next()
                             } else {
@@ -124,6 +129,10 @@ const studentAuth = async (req, res, next) => {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
                             if (userFounded.role == 'Student' && userFounded.disable == false) {
+                                const trialResult = await checkAndApplyTopsorobanTrial(userFounded);
+                                if (trialResult.isExpired) {
+                                    return res.json({ message: trialResult.message || 'Your account has been disabled due to trial expiration.' });
+                                }
                                 req.userData = userFounded
                                 next()
                             } else {
@@ -272,6 +281,10 @@ const generalAuth = async (req, res, next) => {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
                             if (userFounded.disable === false) {
+                                const trialResult = await checkAndApplyTopsorobanTrial(userFounded);
+                                if (trialResult.isExpired) {
+                                    return res.json({ message: trialResult.message || 'Your account has been disabled due to trial expiration.' });
+                                }
                                 req.userData = userFounded
                                 next()
                             } else {
@@ -309,6 +322,10 @@ const itOrTeacherAuth = async (req, res, next) => {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
                             if ((userFounded.role == 'IT' || userFounded.role == 'School' || userFounded.role == 'Teacher') && userFounded.disable == false) {
+                                const trialResult = await checkAndApplyTopsorobanTrial(userFounded);
+                                if (trialResult.isExpired) {
+                                    return res.json({ message: trialResult.message || 'Your account has been disabled due to trial expiration.' });
+                                }
                                 req.userData = userFounded
                                 next()
                             } else {

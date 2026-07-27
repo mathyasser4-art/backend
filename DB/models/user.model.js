@@ -78,6 +78,18 @@ const userSchema = new mongoose.Schema({
     currentTankSkin: {
         type: String,
         default: null
+    },
+    trialStartedAt: {
+        type: Date,
+        default: null
+    },
+    trialEndsAt: {
+        type: Date,
+        default: null
+    },
+    isPaid: {
+        type: Boolean,
+        default: false
     }
 })
 

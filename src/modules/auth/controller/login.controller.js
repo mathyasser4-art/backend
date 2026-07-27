@@ -36,6 +36,12 @@ const login = async (req, res) => {
             return res.json({ message: 'Incorrect username or password' });
         }
 
+        const { checkAndApplyTopsorobanTrial } = require('../../../services/topsorobanTrial.service');
+        const trialResult = await checkAndApplyTopsorobanTrial(findUser);
+        if (trialResult.isExpired) {
+            return res.json({ message: trialResult.message || 'Your 30-day free trial for Topsoroban has expired. Please contact support to unlock your account.' });
+        }
+
         const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
         res.json({
             message: 'success',
