@@ -42,6 +42,12 @@ const login = async (req, res) => {
             return res.json({ message: trialResult.message || 'Your 30-day free trial for Topsoroban has expired. Please contact support to unlock your account.' });
         }
 
+        let remainingDays = null;
+        if (findUser.trialEndsAt) {
+            const diffMs = new Date(findUser.trialEndsAt).getTime() - Date.now();
+            remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        }
+
         const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
         res.json({
             message: 'success',
@@ -49,7 +55,11 @@ const login = async (req, res) => {
             userName: findUser.userName,
             role: findUser.role,
             userID: findUser._id,
-            createdBy: findUser.createdBy
+            createdBy: findUser.createdBy,
+            trialStartedAt: findUser.trialStartedAt,
+            trialEndsAt: findUser.trialEndsAt,
+            isPaid: findUser.isPaid,
+            remainingDays
         });
     } catch (error) {
         res.status(502).json({ message: error.message });
