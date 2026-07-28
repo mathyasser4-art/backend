@@ -59,7 +59,7 @@ const addClass = async (req, res) => {
 
 const addMultipleClasses = async (req, res) => {
     try {
-        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy || req.userData._id) : req.userData._id
         const classNames = req.body.classNames || []
 
         if (!Array.isArray(classNames) || classNames.length === 0) {
@@ -67,13 +67,17 @@ const addMultipleClasses = async (req, res) => {
         }
 
         const createdClasses = []
+        const uniqueClassNames = [...new Set(classNames.map(c => typeof c === 'string' ? c.trim() : '').filter(Boolean))]
 
-        for (let className of classNames) {
-            className = className.trim()
-            if (!className) continue
-
+        for (let className of uniqueClassNames) {
             const existingClass = await classModel.findOne({ class: className, school: schoolID })
-            if (existingClass) continue
+            if (existingClass) {
+                if (req.userData.role === 'Teacher') {
+                    await classModel.findByIdAndUpdate(existingClass._id, { $addToSet: { teachers: req.userData._id } })
+                    await userModel.findByIdAndUpdate(req.userData._id, { $addToSet: { classList: existingClass._id } })
+                }
+                continue
+            }
 
             const classBody = { class: className, school: schoolID }
             if (req.userData.role == 'Teacher') {
@@ -90,9 +94,18 @@ const addMultipleClasses = async (req, res) => {
 
             try {
                 const hashPassword = await bcrypt.hash('1234', parseInt(process.env.SALTROUNDS) || 10)
+                let studentUserName = addClassObj.class.trim()
+                if (studentUserName.length < 3) {
+                    studentUserName = `Class ${studentUserName}`
+                }
+                if (studentUserName.length > 45) {
+                    studentUserName = studentUserName.substring(0, 45)
+                }
+
+                const cleanEmailPrefix = addClassObj.class.replace(/[^\w]/g, '') || `class${addClassObj._id}`
                 const studentData = {
-                    userName: addClassObj.class,
-                    email: `${addClassObj.class.replace(/\s+/g, '')}_${addClassObj._id}@student.com`,
+                    userName: studentUserName,
+                    email: `${cleanEmailPrefix}_${addClassObj._id}@student.com`,
                     password: hashPassword,
                     role: 'Student',
                     class: addClassObj._id,

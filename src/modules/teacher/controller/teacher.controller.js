@@ -126,15 +126,13 @@ const addTeacherToClass = async (req, res) => {
         if (findTeacher) {
             const findClass = await classModel.findById(classID)
             if (findClass) {
-                const isFound = findClass.teachers.filter(e => e == teacherID)[0]
+                const isFound = findClass.teachers.some(e => e.toString() === teacherID.toString())
                 if (isFound) {
                     res.json({ message: "This teacher is already added to this class" })
                 } else {
-                    findClass.teachers.push(teacherID)
-                    await findClass.save()
-                    findTeacher.classList.push(classID)
-                    await findTeacher.save()
-                    const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+                    await classModel.findByIdAndUpdate(classID, { $addToSet: { teachers: teacherID } })
+                    await userModel.findByIdAndUpdate(teacherID, { $addToSet: { classList: classID } })
+                    const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy || req.userData._id) : req.userData._id
                     const allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
                     res.json({ message: "success", allClasses })
                 }

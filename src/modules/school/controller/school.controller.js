@@ -113,4 +113,63 @@ const disableSchool = async (req, res) => {
     }
 }
 
-module.exports = { addSchool, getSchool, updateSchool, deleteSchool, disableSchool }
+const registerTeachers = async (req, res) => {
+    try {
+        const schoolID = (req.userData.role === 'IT' || req.userData.role === 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy || req.userData._id) : req.userData._id;
+        const payload = req.body;
+        const teachersArray = Array.isArray(payload) ? payload : (payload.teachers || [payload]);
+
+        const processed = [];
+
+        for (const item of teachersArray) {
+            if (!item.teacherName && !item.userName) continue;
+
+            const name = item.teacherName || item.userName;
+            let existingTeacher = await userModel.findOne({ userName: name, role: 'Teacher', createdBy: schoolID });
+
+            if (!existingTeacher && item.password) {
+                const hashPassword = await bcrypt.hash(item.password, parseInt(process.env.SALTROUNDS) || 10);
+                existingTeacher = new userModel({
+                    userName: name,
+                    email: item.email || `${name.replace(/[^\w]/g, '').toLowerCase()}_${Date.now()}@teacher.com`,
+                    password: hashPassword,
+                    role: 'Teacher',
+                    verify: true,
+                    disable: false,
+                    createdBy: schoolID,
+                    maxStudents: item.maxStudents || 0
+                });
+                await existingTeacher.save();
+            }
+
+            if (existingTeacher && Array.isArray(item.groups)) {
+                for (const grp of item.groups) {
+                    const groupName = grp.groupName || grp.class;
+                    if (!groupName) continue;
+
+                    let existingClass = await classModel.findOne({ class: groupName, school: schoolID });
+                    if (!existingClass) {
+                        existingClass = new classModel({
+                            class: groupName,
+                            school: schoolID,
+                            teachers: [existingTeacher._id]
+                        });
+                        await existingClass.save();
+                    } else {
+                        await classModel.findByIdAndUpdate(existingClass._id, { $addToSet: { teachers: existingTeacher._id } });
+                    }
+
+                    await userModel.findByIdAndUpdate(existingTeacher._id, { $addToSet: { classList: existingClass._id } });
+                }
+            }
+
+            processed.push(existingTeacher || item);
+        }
+
+        res.json({ message: "success", data: processed });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+}
+
+module.exports = { addSchool, getSchool, updateSchool, deleteSchool, disableSchool, registerTeachers }
