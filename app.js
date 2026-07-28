@@ -11,7 +11,7 @@ if (isNaN(saltRounds) || saltRounds < 1) {
 
 const cors = require('cors')
 
-// CORS Configuration - Allow requests from frontend domains
+// CORS Configuration - Allow requests from frontend domains & mobile WebViews
 const whitelist = [
   'https://abacusheroes.com',
   'https://www.abacusheroes.com',
@@ -28,18 +28,41 @@ const whitelist = [
   'http://localhost:3005',
   'http://localhost',
   'https://localhost',
-  'capacitor://localhost'
+  'capacitor://localhost',
+  'ionic://localhost',
+  'file://'
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman) or null
+    if (!origin || origin === 'null') {
+      return callback(null, true);
+    }
+
     // Allow exact matches from whitelist
-    if (!origin || whitelist.indexOf(origin) !== -1) {
+    if (whitelist.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+
+    // Allow mobile app schemas & localhost on any port
+    if (
+      origin.startsWith('capacitor://') ||
+      origin.startsWith('ionic://') ||
+      origin.startsWith('file://') ||
+      /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+      /^https:\/\/localhost(:\d+)?$/.test(origin)
+    ) {
       return callback(null, true);
     }
     
-    // Allow any Vercel preview branch or local network IPs (e.g. testing from phone)
-    if (origin.endsWith('.vercel.app') || /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) || /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin)) {
+    // Allow Vercel preview branches or any private local network IPs (e.g. testing from phone)
+    if (
+      origin.endsWith('.vercel.app') || 
+      /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin) || 
+      /^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(origin) ||
+      /^http:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+(:\d+)?$/.test(origin)
+    ) {
       return callback(null, true);
     }
 
