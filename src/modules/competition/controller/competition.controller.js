@@ -563,6 +563,53 @@ const triggerMathRacerEvent = async (req, res) => {
     }
 };
 
+// 9. Kick/Remove a participant from the competition (Teacher host only)
+const removeParticipant = async (req, res) => {
+    try {
+        const teacherID = req.userData._id;
+        const { competitionId } = req.params;
+        const { participantId, studentId } = req.body;
+
+        const competition = await competitionModel.findById(competitionId);
+        if (!competition) {
+            return res.status(404).json({ message: "Competition not found" });
+        }
+
+        if (String(competition.createdBy) !== String(teacherID)) {
+            return res.status(403).json({ message: "Only the host teacher can remove participants" });
+        }
+
+        const targetId = String(participantId || studentId || '');
+        if (!targetId) {
+            return res.status(400).json({ message: "Participant target ID is required" });
+        }
+
+        competition.participants = (competition.participants || []).filter(p => {
+            const pId = String(p._id || '');
+            const sId = String(p.student?._id || p.student || '');
+            const gId = String(p.guestId || '');
+            return pId !== targetId && sId !== targetId && gId !== targetId;
+        });
+
+        competition.markModified('participants');
+        await competition.save();
+
+        // Broadcast real-time kick event to update all client screens & kick the student
+        try {
+            await pusher.trigger(`competition-${competitionId}`, 'student-kicked', {
+                studentId: targetId
+            });
+            console.log(`[KICK] Successfully removed participant ${targetId} from competition ${competitionId}`);
+        } catch (pusherErr) {
+            console.error('[KICK] Pusher trigger error:', pusherErr.message);
+        }
+
+        res.json({ message: "success", competition });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
 module.exports = {
     createCompetition,
     getTeacherCompetitions,
@@ -571,5 +618,6 @@ module.exports = {
     startCompetition,
     updateLiveScore,
     finishCompetition,
+    removeParticipant,
     triggerMathRacerEvent
 };
