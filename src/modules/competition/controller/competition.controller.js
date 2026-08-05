@@ -127,6 +127,8 @@ const sanitizeCompetitionQuestions = (competitionObj) => {
                 // Shuffle choices on the backend
                 q.wrongPicAnswer.sort(() => Math.random() - 0.5);
                 delete q.correctPicAnswer;
+            } else if (q.typeOfAnswer === 'Essay') {
+                delete q.answer;
             }
         });
     }
@@ -494,11 +496,14 @@ const finishCompetition = async (req, res) => {
             for (let i = 0; i < Math.min(sortedParticipants.length, 3); i++) {
                 const participant = sortedParticipants[i];
                 if (participant.score > 0) {
-                    const student = await userModel.findById(participant.student);
-                    if (student) {
-                        student.coins = (student.coins || 0) + rewards[i];
-                        await student.save();
-                        console.log(`Awarded ${rewards[i]} coins to student ${student._id} for placing #${i+1}`);
+                    const studentId = participant.student || (participant.guestId && mongoose.Types.ObjectId.isValid(participant.guestId) ? participant.guestId : null);
+                    if (studentId) {
+                        const student = await userModel.findById(studentId);
+                        if (student) {
+                            student.coins = (student.coins || 0) + rewards[i];
+                            await student.save();
+                            console.log(`Awarded ${rewards[i]} coins to student ${student._id} for placing #${i+1}`);
+                        }
                     }
                 }
             }
