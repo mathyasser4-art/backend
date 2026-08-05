@@ -22,7 +22,7 @@ competitionRouter.post('/competition/:competitionId/join', optionalAuth, joinCom
 competitionRouter.post('/competition/:competitionId/score', optionalAuth, updateLiveScore)
 
 // Shared endpoints (accessible by both teachers and students)
-competitionRouter.get('/competition/:competitionId/details', getCompetitionDetails)
+competitionRouter.get('/competition/:competitionId/details', optionalAuth, getCompetitionDetails)
 competitionRouter.post('/competition/mathracer/trigger', triggerMathRacerEvent)
 
 module.exports = competitionRouter

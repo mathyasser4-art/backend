@@ -197,9 +197,24 @@ const joinCompetition = async (req, res) => {
             studentID = req.body.studentId;
             userName = req.body.userName || req.body.guestName || 'Student';
         } else if (!studentID) {
-            studentID = req.body.studentId || req.body.guestId || 'guest_' + Math.random().toString(36).substr(2, 9);
-            userName = req.body.userName || req.body.guestName || 'Guest';
-            isGuest = true;
+            const candidateId = req.body.studentId || req.body.guestId;
+            if (candidateId && mongoose.Types.ObjectId.isValid(candidateId)) {
+                try {
+                    const foundUser = await userModel.findById(candidateId);
+                    if (foundUser) {
+                        studentID = foundUser._id;
+                        userName = foundUser.userName;
+                        isGuest = false;
+                    }
+                } catch (e) {
+                    console.error('[JOIN] User lookup error for candidateId:', candidateId, e);
+                }
+            }
+            if (!studentID) {
+                studentID = candidateId || 'guest_' + Math.random().toString(36).substr(2, 9);
+                userName = req.body.userName || req.body.guestName || 'Guest';
+                isGuest = true;
+            }
         }
 
         console.log(`[JOIN] User ${studentID} (${userName}) attempting to join competition ${competitionId}`);
@@ -358,16 +373,21 @@ const updateLiveScore = async (req, res) => {
 
                     const studentAnsStr = normalizeDigits(submittedAns.studentAnswer);
                     
+                    const normalizeText = (val) => {
+                        if (val === undefined || val === null) return "";
+                        return normalizeDigits(val).toLowerCase().trim();
+                    };
+                    
                     if (q.typeOfAnswer === 'Essay') {
-                        if (q.answer && q.answer.map(normalizeDigits).includes(studentAnsStr)) {
+                        if (q.answer && q.answer.map(normalizeText).includes(normalizeText(submittedAns.studentAnswer))) {
                             isCorrect = true;
                         }
                     } else if (q.typeOfAnswer === 'MCQ') {
-                        if (normalizeDigits(q.correctAnswer) === studentAnsStr) {
+                        if (normalizeText(q.correctAnswer) === normalizeText(submittedAns.studentAnswer)) {
                             isCorrect = true;
                         }
                     } else if (q.typeOfAnswer === 'Graph') {
-                        if (q.correctPicAnswer === submittedAns.studentAnswer) {
+                        if (String(q.correctPicAnswer || "").trim() === String(submittedAns.studentAnswer || "").trim()) {
                             isCorrect = true;
                         }
                     }
@@ -505,10 +525,14 @@ const triggerMathRacerEvent = async (req, res) => {
 
         // Economy: Award coins for finishing 1st, 2nd, 3rd in Math Racer or Tanks Game
         if (eventName === 'mathracer-gameover' || eventName === 'tanks-gameover') {
-            if (eventData && eventData.ranks) {
+            let parsedData = eventData;
+            if (typeof eventData === 'string') {
+                try { parsedData = JSON.parse(eventData); } catch (e) { console.error('[MATHRACER] Failed to parse eventData:', e); }
+            }
+            if (parsedData && Array.isArray(parsedData.ranks)) {
                 const rewards = [50, 30, 10];
-                for (let i = 0; i < Math.min(eventData.ranks.length, 3); i++) {
-                    const studentId = eventData.ranks[i].id;
+                for (let i = 0; i < Math.min(parsedData.ranks.length, 3); i++) {
+                    const studentId = parsedData.ranks[i]?.id;
                     if (studentId) {
                         try {
                             const student = await userModel.findById(studentId);
