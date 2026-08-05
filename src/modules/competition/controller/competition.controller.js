@@ -198,25 +198,22 @@ const joinCompetition = async (req, res) => {
 
         if (req.userData && req.userData.role === 'Teacher' && req.body.studentId) {
             studentID = req.body.studentId;
-            userName = req.body.userName || req.body.guestName || 'Student';
+            userName = req.body.userName || 'Student';
         } else if (!studentID) {
-            const candidateId = req.body.studentId || req.body.guestId;
+            const candidateId = req.body.studentId;
             if (candidateId && mongoose.Types.ObjectId.isValid(candidateId)) {
                 try {
                     const foundUser = await userModel.findById(candidateId);
                     if (foundUser) {
                         studentID = foundUser._id;
                         userName = foundUser.userName;
-                        isGuest = false;
                     }
                 } catch (e) {
                     console.error('[JOIN] User lookup error for candidateId:', candidateId, e);
                 }
             }
             if (!studentID) {
-                studentID = candidateId || 'guest_' + Math.random().toString(36).substr(2, 9);
-                userName = req.body.userName || req.body.guestName || 'Guest';
-                isGuest = true;
+                return res.status(401).json({ message: "Guests are not allowed. Only logged-in students can join competitions. Please log in first." });
             }
         }
 
