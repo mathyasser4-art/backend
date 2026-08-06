@@ -5,11 +5,15 @@ const mongoose = require('mongoose');
 // 1. Create a new Competition Event Card (School / Admin / Teacher)
 const createCompetitionEvent = async (req, res) => {
     try {
-        const userID = req.userData._id;
+        const userID = req.userData ? req.userData._id : (req.body.createdBy || null);
         const { title, description, eventDate } = req.body;
 
         if (!title) {
             return res.status(400).json({ message: "Competition title is required" });
+        }
+
+        if (!userID) {
+            return res.status(401).json({ message: "User not authenticated. Please log in first." });
         }
 
         const newEvent = new competitionEventModel({
@@ -31,36 +35,33 @@ const createCompetitionEvent = async (req, res) => {
 // 2. Get all Competition Event Cards for the School / Teacher
 const getSchoolCompetitionEvents = async (req, res) => {
     try {
-        const userID = req.userData._id;
-        const user = await userModel.findById(userID);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
+        const userID = req.userData ? req.userData._id : null;
+        let events = [];
+
+        if (userID) {
+            const user = await userModel.findById(userID);
+            let schoolId = userID;
+            if (user && user.role === 'Teacher' && user.createdBy) {
+                schoolId = user.createdBy;
+            }
+
+            const teachersInSchool = await userModel.find({ 
+                $or: [{ _id: schoolId }, { createdBy: schoolId }] 
+            }).select('_id');
+            const teacherIds = teachersInSchool.map(t => t._id);
+
+            events = await competitionEventModel.find({
+                createdBy: { $in: teacherIds }
+            })
+            .populate({ path: 'registrations.student', select: 'userName email role' })
+            .populate({ path: 'registrations.teacher', select: 'userName email role' })
+            .sort({ _id: -1 });
+        } else {
+            events = await competitionEventModel.find({})
+                .populate({ path: 'registrations.student', select: 'userName email role' })
+                .populate({ path: 'registrations.teacher', select: 'userName email role' })
+                .sort({ _id: -1 });
         }
-
-        // Resolve School ID (if teacher, use createdBy; if School/Admin, use own _id)
-        let schoolId = userID;
-        if (user.role === 'Teacher' && user.createdBy) {
-            schoolId = user.createdBy;
-        }
-
-        // Find all events created by this school OR by any teacher in this school
-        const teachersInSchool = await userModel.find({ 
-            $or: [{ _id: schoolId }, { createdBy: schoolId }] 
-        }).select('_id');
-        const teacherIds = teachersInSchool.map(t => t._id);
-
-        const events = await competitionEventModel.find({
-            createdBy: { $in: teacherIds }
-        })
-        .populate({
-            path: 'registrations.student',
-            select: 'userName email role'
-        })
-        .populate({
-            path: 'registrations.teacher',
-            select: 'userName email role'
-        })
-        .sort({ _id: -1 });
 
         res.json({ message: "success", events });
     } catch (error) {

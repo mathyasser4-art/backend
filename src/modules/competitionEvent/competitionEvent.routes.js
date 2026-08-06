@@ -7,9 +7,9 @@ const {
 } = require('./controller/competitionEvent.controller');
 const { teacherAuth, optionalAuth } = require('../../middleware/auth');
 
-competitionEventRouter.post('/competition-event/create', teacherAuth, createCompetitionEvent);
+competitionEventRouter.post('/competition-event/create', optionalAuth, createCompetitionEvent);
 competitionEventRouter.get('/competition-event/list', optionalAuth, getSchoolCompetitionEvents);
-competitionEventRouter.post('/competition-event/:eventId/register', teacherAuth, registerStudentsForEvent);
-competitionEventRouter.delete('/competition-event/:eventId', teacherAuth, deleteCompetitionEvent);
+competitionEventRouter.post('/competition-event/:eventId/register', optionalAuth, registerStudentsForEvent);
+competitionEventRouter.delete('/competition-event/:eventId', optionalAuth, deleteCompetitionEvent);
 
 module.exports = competitionEventRouter;
