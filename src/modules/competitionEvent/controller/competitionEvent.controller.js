@@ -129,9 +129,33 @@ const deleteCompetitionEvent = async (req, res) => {
     }
 };
 
+// 5. Update / Edit a Competition Event Card (Title, Description, Event Date)
+const updateCompetitionEvent = async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const { title, description, eventDate } = req.body;
+
+        const event = await competitionEventModel.findById(eventId);
+        if (!event) {
+            return res.status(404).json({ message: "Competition event card not found" });
+        }
+
+        if (title !== undefined) event.title = title;
+        if (description !== undefined) event.description = description;
+        if (eventDate !== undefined) event.eventDate = eventDate ? new Date(eventDate) : null;
+
+        await event.save();
+        res.json({ message: "success", event });
+    } catch (error) {
+        console.error('Error updating competition event:', error);
+        res.status(502).json({ message: error.message });
+    }
+};
+
 module.exports = {
     createCompetitionEvent,
     getSchoolCompetitionEvents,
     registerStudentsForEvent,
-    deleteCompetitionEvent
+    deleteCompetitionEvent,
+    updateCompetitionEvent
 };
