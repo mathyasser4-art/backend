@@ -169,9 +169,15 @@ const getStudentResults = async (req, res) => {
             return res.status(404).json({ message: "Assignment not found" });
         }
 
-        // Check if teacher created this assignment
-        if (String(assignment.createdBy) !== String(teacherID)) {
-            return res.status(403).json({ message: "Access denied - You don't own this assignment" });
+        // Check permissions: allow assignment creator OR School / IT / Supervisor / Admin accounts
+        if (req.userData) {
+            const userRole = req.userData.role;
+            const isOwner = String(assignment.createdBy) === String(req.userData._id);
+            const isSchoolOrAdmin = userRole === 'School' || userRole === 'IT' || userRole === 'Supervisor' || userRole === 'Admin';
+            
+            if (!isOwner && !isSchoolOrAdmin) {
+                return res.status(403).json({ message: "Access denied - You don't have permission to view this assignment's reports" });
+            }
         }
 
         // Get all answers for this assignment with student information

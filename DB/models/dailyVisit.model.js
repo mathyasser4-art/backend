@@ -19,6 +19,10 @@ const dailyVisitSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    schoolId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user"
+    },
     firstSeen: {
         type: Date,
         default: Date.now

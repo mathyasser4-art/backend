@@ -99,26 +99,46 @@ const CronJob = require('cron').CronJob;
 // --- LIVE DASHBOARD HEARTBEAT ---
 const activeSessions = new Map();
 const DailyVisit = require('./DB/models/dailyVisit.model.js');
+const userModel = require('./DB/models/user.model.js');
+const jwt = require('jsonwebtoken');
 
-app.post('/heartbeat', (req, res) => {
+app.post('/heartbeat', async (req, res) => {
     try {
-        const { sessionId, userId, role, userName } = req.body;
+        const { sessionId, userId, role, userName, schoolId } = req.body;
+        let userSchoolId = schoolId || null;
+
         if (sessionId) {
             activeSessions.set(sessionId, {
                 timestamp: Date.now(),
                 userId: userId || null,
                 role: role || 'Visitor',
-                userName: userName || 'Anonymous'
+                userName: userName || 'Anonymous',
+                schoolId: userSchoolId
             });
         }
         
         // Record historical visit for authenticated users
         if (userId && role && role !== 'Visitor') {
             const dateStr = new Date().toISOString().split('T')[0];
+            
+            // If schoolId was not sent from client, try to resolve it from user model
+            if (!userSchoolId) {
+                try {
+                    const u = await userModel.findById(userId).select('role createdBy');
+                    if (u) {
+                        if (u.role === 'School') userSchoolId = u._id;
+                        else if (u.createdBy) userSchoolId = u.createdBy;
+                    }
+                } catch (e) {}
+            }
+
+            const updateObj = { role, userName, lastSeen: new Date() };
+            if (userSchoolId) updateObj.schoolId = userSchoolId;
+
             DailyVisit.updateOne(
                 { date: dateStr, userId: userId },
                 { 
-                    $set: { role, userName, lastSeen: new Date() },
+                    $set: updateObj,
                     $setOnInsert: { firstSeen: new Date() }
                 },
                 { upsert: true }
@@ -141,9 +161,44 @@ setInterval(() => {
     }
 }, 30000);
 
-app.get('/live-stats', (req, res) => {
+// Helper to extract school context from auth header
+const getSchoolContext = async (req) => {
+    const { authrization } = req.headers;
+    if (authrization && authrization.startsWith(process.env.AUTH_SECRET_KEY)) {
+        const userToken = authrization.split(process.env.AUTH_SECRET_KEY)[1];
+        if (userToken && userToken !== 'null' && userToken !== 'undefined') {
+            try {
+                const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY);
+                const user = await userModel.findById(id);
+                if (user && (user.role === 'School' || user.role === 'Teacher' || user.role === 'IT' || user.role === 'Supervisor')) {
+                    let schoolId = user._id;
+                    if ((user.role === 'Teacher' || user.role === 'Supervisor') && user.createdBy) {
+                        schoolId = user.createdBy;
+                    }
+                    const schoolUsers = await userModel.find({
+                        $or: [{ _id: schoolId }, { createdBy: schoolId }]
+                    }).select('_id');
+                    const schoolUserIds = schoolUsers.map(u => String(u._id));
+                    return { isSchoolFiltered: true, schoolId: String(schoolId), schoolUserIds };
+                }
+            } catch (err) {}
+        }
+    }
+    return { isSchoolFiltered: false };
+};
+
+app.get('/live-stats', async (req, res) => {
     try {
-        const users = Array.from(activeSessions.values());
+        let users = Array.from(activeSessions.values());
+        const ctx = await getSchoolContext(req);
+
+        if (ctx.isSchoolFiltered) {
+            users = users.filter(u => 
+                (u.schoolId && String(u.schoolId) === ctx.schoolId) ||
+                (u.userId && ctx.schoolUserIds.includes(String(u.userId)))
+            );
+        }
+
         res.json({
             success: true,
             totalVisitors: users.length,
@@ -157,7 +212,17 @@ app.get('/live-stats', (req, res) => {
 app.get('/historical-stats', async (req, res) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
-        const visits = await DailyVisit.find({ date }).sort({ lastSeen: -1 });
+        let query = { date };
+
+        const ctx = await getSchoolContext(req);
+        if (ctx.isSchoolFiltered) {
+            query.$or = [
+                { schoolId: ctx.schoolId },
+                { userId: { $in: ctx.schoolUserIds } }
+            ];
+        }
+
+        const visits = await DailyVisit.find(query).sort({ lastSeen: -1 });
         res.json({
             success: true,
             date: date,

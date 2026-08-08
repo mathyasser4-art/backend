@@ -220,9 +220,12 @@ const getTeacherClass = async (req, res) => {
 
 const getAllAssignment = async (req, res) => {
     try {
-        const teacherID = req.userData._id
+        let teacherID = req.query.teacherID || (req.userData ? req.userData._id : null);
+        if (!teacherID) {
+            return res.status(400).json({ message: "Teacher ID required" });
+        }
         const getAssignment = await assignmentModel.find({ createdBy: teacherID }).select('-createdBy').populate([{ path: 'questions', select: '-chapter' }, { path: 'classes', select: 'class' }, { path: 'students.solveBy', select: 'userName' }]).sort({ _id: -1 })
-        if (getAssignment.length != 0) {
+        if (getAssignment && getAssignment.length != 0) {
             res.json({ message: 'success', allAssignment: getAssignment })
         } else {
             res.json({ message: 'There are no assignment available now' })
@@ -235,7 +238,7 @@ const getAllAssignment = async (req, res) => {
 const getStudentHistory = async (req, res) => {
     try {
         const { studentID } = req.params
-        const teacherID = req.userData._id
+        let teacherID = req.query.teacherID || (req.userData ? req.userData._id : null);
 
         // Find the student
         const student = await userModel.findById(studentID).select('userName email')
@@ -243,11 +246,12 @@ const getStudentHistory = async (req, res) => {
             return res.status(404).json({ message: 'Student not found' })
         }
 
-        // Find all answers by this student for assignments created by this teacher
+        // Find all answers by this student for assignments
+        const matchQuery = teacherID ? { createdBy: teacherID } : {};
         const studentAnswers = await answerModel.find({ solveBy: studentID })
             .populate({
                 path: 'assignment',
-                match: { createdBy: teacherID },
+                match: matchQuery,
                 select: 'title totalPoints createdAt'
             })
             .sort({ _id: -1 })
