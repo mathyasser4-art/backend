@@ -308,7 +308,7 @@ const getStudentHistory = async (req, res) => {
                 completedAt: answer.createdAt || answer.updatedAt || answer.assignment.createdAt,
                 totalQuestions: answer.questionsNumber || 0,
                 answeredQuestions: answer.questionsNumber || 0,
-                timeSpent: answer.timeSpent || '0:00'
+                timeSpent: answer.time || '0:00'
             }
         })
 
