@@ -211,21 +211,40 @@ app.get('/live-stats', async (req, res) => {
 
 app.get('/historical-stats', async (req, res) => {
     try {
-        const date = req.query.date || new Date().toISOString().split('T')[0];
-        let query = { date };
+        const { startDate, endDate, date } = req.query;
+        let dateQuery = {};
+
+        if (startDate && endDate) {
+            dateQuery = { date: { $gte: startDate, $lte: endDate } };
+        } else if (startDate) {
+            dateQuery = { date: { $gte: startDate } };
+        } else if (endDate) {
+            dateQuery = { date: { $lte: endDate } };
+        } else {
+            const defaultDate = date || new Date().toISOString().split('T')[0];
+            dateQuery = { date: defaultDate };
+        }
+
+        let query = { ...dateQuery };
 
         const ctx = await getSchoolContext(req);
         if (ctx.isSchoolFiltered) {
-            query.$or = [
-                { schoolId: ctx.schoolId },
-                { userId: { $in: ctx.schoolUserIds } }
+            query.$and = [
+                dateQuery,
+                {
+                    $or: [
+                        { schoolId: ctx.schoolId },
+                        { userId: { $in: ctx.schoolUserIds } }
+                    ]
+                }
             ];
         }
 
-        const visits = await DailyVisit.find(query).sort({ lastSeen: -1 });
+        const visits = await DailyVisit.find(query).sort({ date: -1, lastSeen: -1 });
         res.json({
             success: true,
-            date: date,
+            startDate: startDate || date || new Date().toISOString().split('T')[0],
+            endDate: endDate || date || new Date().toISOString().split('T')[0],
             users: visits
         });
     } catch (error) {
