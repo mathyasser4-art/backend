@@ -321,7 +321,7 @@ const startCompetition = async (req, res) => {
 const updateLiveScore = async (req, res) => {
     try {
         const { competitionId } = req.params;
-        const { score, totalAnswered, wrongAnswers, finished, answers, studentId, userName } = req.body;
+        const { score, totalAnswered, wrongAnswers, finished, finishedAt: clientFinishedAt, answers, studentId, userName } = req.body;
 
         let activeID = req.userData ? req.userData._id : (studentId || req.body.guestId);
         let activeName = req.userData ? req.userData.userName : (userName || req.body.guestName || 'Guest');
@@ -417,7 +417,14 @@ const updateLiveScore = async (req, res) => {
         }
 
         if (finished && !participant.finishedAt) {
-            participant.finishedAt = new Date();
+            let validatedFinishedAt = new Date();
+            if (clientFinishedAt) {
+                const parsedDate = new Date(clientFinishedAt);
+                if (!isNaN(parsedDate.getTime()) && parsedDate <= new Date()) {
+                    validatedFinishedAt = parsedDate;
+                }
+            }
+            participant.finishedAt = validatedFinishedAt;
         }
 
         competition.markModified('participants');
