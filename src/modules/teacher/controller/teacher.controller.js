@@ -1,4 +1,5 @@
 const userModel = require('../../../../DB/models/user.model')
+// Teacher assignment & student history controller with elapsed active time tracking
 const classModel = require('../../../../DB/models/class.model')
 const assignmentModel = require('../../../../DB/models/assignment.model')
 const answerModel = require('../../../../DB/models/answer.model')
