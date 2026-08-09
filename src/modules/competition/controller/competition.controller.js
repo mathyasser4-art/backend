@@ -290,7 +290,7 @@ const startCompetition = async (req, res) => {
         }
 
         competition.status = 'active';
-        competition.startedAt = new Date();
+        competition.startedAt = new Date(Date.now() + 3000);
         await competition.save();
 
         // Economy: Reward teacher for starting a battle
