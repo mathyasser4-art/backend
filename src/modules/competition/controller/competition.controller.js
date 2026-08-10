@@ -424,6 +424,12 @@ const updateLiveScore = async (req, res) => {
                     validatedFinishedAt = parsedDate;
                 }
             }
+            if (competition.startedAt && competition.timer) {
+                const maxFinishMs = new Date(competition.startedAt).getTime() + (competition.timer * 1000);
+                if (validatedFinishedAt.getTime() > maxFinishMs) {
+                    validatedFinishedAt = new Date(maxFinishMs);
+                }
+            }
             participant.finishedAt = validatedFinishedAt;
         }
 
@@ -466,10 +472,18 @@ const finishCompetition = async (req, res) => {
 
         competition.status = 'finished';
         const now = new Date();
+        const maxFinishMs = competition.startedAt && competition.timer 
+            ? new Date(competition.startedAt).getTime() + (competition.timer * 1000)
+            : now.getTime();
+
         if (competition.participants && competition.participants.length > 0) {
             competition.participants.forEach(p => {
                 if (!p.finishedAt) {
-                    p.finishedAt = now;
+                    p.finishedAt = new Date(Math.min(now.getTime(), maxFinishMs));
+                } else if (competition.startedAt && competition.timer) {
+                    if (new Date(p.finishedAt).getTime() > maxFinishMs) {
+                        p.finishedAt = new Date(maxFinishMs);
+                    }
                 }
             });
             competition.markModified('participants');
