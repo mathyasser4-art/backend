@@ -6,6 +6,7 @@ const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
 const bcrypt = require('bcryptjs');
+const { shuffleAndBalanceMCQ } = require('../../../services/mcqShuffle.service');
 
 const getStudent = async (req, res) => {
     try {
@@ -280,31 +281,7 @@ const getAssignment = async (req, res) => {
 
 const sanitizeAssignmentQuestions = (assignmentObj) => {
     if (assignmentObj && Array.isArray(assignmentObj.questions)) {
-        assignmentObj.questions.forEach(q => {
-            if (q.typeOfAnswer === 'MCQ' && Array.isArray(q.wrongAnswer)) {
-                const correctVal = String(q.correctAnswer || "").trim();
-                if (correctVal) {
-                    const normalizedWrong = q.wrongAnswer.map(e => String(e || "").trim());
-                    if (!normalizedWrong.includes(correctVal)) {
-                        q.wrongAnswer.push(q.correctAnswer);
-                    }
-                }
-                // Shuffle choices on the backend
-                q.wrongAnswer.sort(() => Math.random() - 0.5);
-                delete q.correctAnswer;
-            } else if (q.typeOfAnswer === 'Graph' && Array.isArray(q.wrongPicAnswer)) {
-                const correctPic = String(q.correctPicAnswer || "").trim();
-                if (correctPic) {
-                    const normalizedWrongPic = q.wrongPicAnswer.map(e => String(e || "").trim());
-                    if (!normalizedWrongPic.includes(correctPic)) {
-                        q.wrongPicAnswer.push(q.correctPicAnswer);
-                    }
-                }
-                // Shuffle choices on the backend
-                q.wrongPicAnswer.sort(() => Math.random() - 0.5);
-                delete q.correctPicAnswer;
-            }
-        });
+        assignmentObj.questions = shuffleAndBalanceMCQ(assignmentObj.questions, { sanitize: true });
     }
     return assignmentObj;
 };

@@ -7,6 +7,7 @@ const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
 const mongoose = require('mongoose')
+const { shuffleAndBalanceMCQ } = require('../../../services/mcqShuffle.service')
 
 const getChapterQuestion = async (req, res) => {
     try {
@@ -72,7 +73,11 @@ const getChapterQuestion = async (req, res) => {
             })
 
         if (chapter) {
-            res.json({ message: "success", chapter })
+            const chapterObj = chapter.toObject();
+            if (Array.isArray(chapterObj.questions)) {
+                chapterObj.questions = shuffleAndBalanceMCQ(chapterObj.questions);
+            }
+            res.json({ message: "success", chapter: chapterObj })
         } else {
             res.json({ message: "This chapter is not found" })
         }
