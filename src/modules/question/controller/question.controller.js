@@ -17,6 +17,12 @@ const addQuestion = async (req, res) => {
         const findChapter = await chapterModel.findById(chapter)
 
         if (findChapter) {
+            // Validate: reject questions where the running total goes negative at any step
+            const negativeCheck = hasNegativeIntermediateStep(req.body.question);
+            if (negativeCheck.hasNegative) {
+                return res.json({ message: negativeCheck.message });
+            }
+
             if (req.file) {
                 const imageURI = req.file.path;
                 const { secure_url, public_id } = await cloudinary.uploader.upload(imageURI, { folder: 'questionPic', resource_type: "image" });
@@ -136,6 +142,14 @@ const updateQuestion = async (req, res) => {
                     return res.status(403).json({ message: "You do not have permission to modify this question" })
                 }
             }
+
+            // Validate: reject updates where the running total goes negative at any step
+            const questionText = req.body.question || findQuestion.question;
+            const negativeCheck = hasNegativeIntermediateStep(questionText);
+            if (negativeCheck.hasNegative) {
+                return res.json({ message: negativeCheck.message });
+            }
+
             if (req.file) {
                 const imageURI = req.file.path;
                 const { secure_url, public_id } = await cloudinary.uploader.upload(imageURI, { folder: 'questionPic', resource_type: "image" });
@@ -342,6 +356,61 @@ function evaluateMath(expression) {
     } catch (err) {
         return null;
     }
+}
+
+// ── Negative intermediate step validator ──────────────────────────────────────
+// Parses an arithmetic question like "15 - 20 + 8 = ?" and walks left-to-right.
+// Returns { hasNegative: true, message } if the running total drops below 0 at any step.
+function hasNegativeIntermediateStep(questionText) {
+    const result = { hasNegative: false, message: '' };
+    if (!questionText || typeof questionText !== 'string') return result;
+
+    // Normalise Arabic digits to Western
+    let expr = String(questionText)
+        .replace(/[٠١٢٣٤٥٦٧٨٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+
+    // Strip everything from "=" onward (e.g. "= ?")
+    expr = expr.replace(/=.*$/, '').trim();
+
+    // Replace multiplication/division symbols (these questions are add/sub only,
+    // but if the expression has × or ÷ we skip the check — not a simple soroban chain)
+    if (/[×÷xX*\/]/i.test(expr)) return result;
+
+    // Tokenise: extract numbers and +/- operators
+    // Matches signed numbers and operators from strings like "15 - 20 + 8"
+    const tokens = expr.match(/(\d+\.?\d*|[+\-])/g);
+    if (!tokens || tokens.length === 0) return result;
+
+    let runningTotal = 0;
+    let currentOp = '+';
+    let stepIndex = 0;
+
+    for (const token of tokens) {
+        if (token === '+' || token === '-') {
+            currentOp = token;
+            continue;
+        }
+
+        const num = parseFloat(token);
+        if (isNaN(num)) continue;
+
+        if (currentOp === '+') {
+            runningTotal += num;
+        } else {
+            runningTotal -= num;
+        }
+        stepIndex++;
+
+        if (runningTotal < 0) {
+            result.hasNegative = true;
+            result.message = `لا يمكن إضافة هذا السؤال: الناتج يصبح سالباً (${runningTotal}) عند الخطوة ${stepIndex} في "${questionText}"`;
+            result.stepIndex = stepIndex;
+            result.negativeValue = runningTotal;
+            return result;
+        }
+    }
+
+    return result;
 }
 
 // ── 1. Toggle reporting a question error (Teacher Only) ──────────────────────
