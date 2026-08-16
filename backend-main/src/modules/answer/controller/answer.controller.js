@@ -732,4 +732,42 @@ const getAllAttempts = async (req, res) => {
 };
 
 // Note: correctAnswer function kept for backward compatibility but not exposed in routes
-module.exports = { checkAssinmentAnswer, getAssignmentAnswer, getResult, getStudentOwnReport, debugAnswerDocument, getAllAttempts }
+// Reset/decrement student attempt count when retrying after a glitch or lockout
+const resetGlitchAttempt = async (req, res) => {
+    try {
+        const { assignmentID } = req.params;
+        const studentID = req.userData._id;
+
+        console.log('=== resetGlitchAttempt START ===');
+        console.log('Student ID:', studentID);
+        console.log('Assignment ID:', assignmentID);
+
+        const assignment = await assignmentModel.findById(assignmentID);
+        if (!assignment) {
+            return res.status(440).json({ message: "Assignment not found" });
+        }
+
+        const studentIndex = assignment.students?.findIndex(s => String(s.solveBy) === String(studentID));
+        if (studentIndex !== -1 && studentIndex !== undefined) {
+            const currentAttempts = assignment.students[studentIndex].attempts || 0;
+            // Decrement attempt counter so student can attempt again (minimum 0)
+            const newAttempts = Math.max(0, currentAttempts - 1);
+            assignment.students[studentIndex].attempts = newAttempts;
+            await assignment.save();
+
+            console.log(`Reset attempts for student ${studentID} on assignment ${assignmentID}: ${currentAttempts} -> ${newAttempts}`);
+            return res.json({ 
+                message: "success", 
+                attempts: newAttempts,
+                previousAttempts: currentAttempts 
+            });
+        }
+
+        return res.json({ message: "success", note: "Student record not found in assignment" });
+    } catch (error) {
+        console.error('resetGlitchAttempt error:', error);
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+module.exports = { checkAssinmentAnswer, getAssignmentAnswer, getResult, getStudentOwnReport, debugAnswerDocument, getAllAttempts, resetGlitchAttempt }
