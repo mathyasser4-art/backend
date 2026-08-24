@@ -1,5 +1,7 @@
 const questionModel = require('../../../../DB/models/question.model')
 const chapterModel = require('../../../../DB/models/chapter.model')
+const userModel = require('../../../../DB/models/user.model')
+const questionReportModel = require('../../../../DB/models/questionReport.model')
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
@@ -15,6 +17,12 @@ const addQuestion = async (req, res) => {
         const findChapter = await chapterModel.findById(chapter)
 
         if (findChapter) {
+            // Validate: reject questions where the running total goes negative at any step
+            const negativeCheck = hasNegativeIntermediateStep(req.body.question);
+            if (negativeCheck.hasNegative) {
+                return res.json({ message: negativeCheck.message });
+            }
+
             if (req.file) {
                 const imageURI = req.file.path;
                 const { secure_url, public_id } = await cloudinary.uploader.upload(imageURI, { folder: 'questionPic', resource_type: "image" });
@@ -22,10 +30,13 @@ const addQuestion = async (req, res) => {
                 req.body.questionPic = secure_url
                 req.body.questionPicID = public_id
             }
+            if (req.userData) {
+                req.body.createdBy = req.userData._id;
+            }
             const addQuestion = new questionModel(req.body)
             const questionData = await addQuestion.save()
             if (questionData) {
-                if (index == 'last') {
+                if (index === 'last' || !index) {
                     findChapter.questions.push(questionData._id)
                 } else {
                     findChapter.questions.splice(parseInt(index) + 1, 0, questionData._id);
@@ -126,6 +137,19 @@ const updateQuestion = async (req, res) => {
         const findQuestion = await questionModel.findById(questionID)
 
         if (findQuestion) {
+            if (req.userData && req.userData.role !== 'Admin') {
+                if (String(findQuestion.createdBy) !== String(req.userData._id)) {
+                    return res.status(403).json({ message: "You do not have permission to modify this question" })
+                }
+            }
+
+            // Validate: reject updates where the running total goes negative at any step
+            const questionText = req.body.question || findQuestion.question;
+            const negativeCheck = hasNegativeIntermediateStep(questionText);
+            if (negativeCheck.hasNegative) {
+                return res.json({ message: negativeCheck.message });
+            }
+
             if (req.file) {
                 const imageURI = req.file.path;
                 const { secure_url, public_id } = await cloudinary.uploader.upload(imageURI, { folder: 'questionPic', resource_type: "image" });
@@ -197,6 +221,7 @@ const getQuestionDetails = async (req, res) => {
         const { questionID } = req.params
         const question = await questionModel.findById(questionID)
         if (question) {
+            res.set('Cache-Control', 'public, max-age=10, s-maxage=60, stale-while-revalidate=30');
             res.json({ message: "success", question });
         } else {
             res.json({ message: "this question is not available" });
@@ -209,6 +234,17 @@ const getQuestionDetails = async (req, res) => {
 const deleteQuestion = async (req, res) => {
     try {
         const { questionID, chapterID } = req.params
+        const findQuestion = await questionModel.findById(questionID)
+        if (!findQuestion) {
+            return res.json({ message: "this question is not available" });
+        }
+
+        if (req.userData && req.userData.role !== 'Admin') {
+            if (String(findQuestion.createdBy) !== String(req.userData._id)) {
+                return res.status(403).json({ message: "You do not have permission to delete this question" })
+            }
+        }
+
         const question = await questionModel.findByIdAndDelete(questionID)
         if (question) {
             if (question.questionPicID)
@@ -254,5 +290,247 @@ const updateAutoCorrect = async (req, res) => {
         res.status(502).json({ message: error.message })
     }
 }
+const getQuestionsByLevel = async (req, res) => {
+    try {
+        const { level } = req.params;
+        const levelNum = Number(level);
+        
+        if (isNaN(levelNum) || ![0, 1, 2, 3].includes(levelNum)) {
+            return res.json({ message: "invalid level, must be 0, 1, 2, or 3" });
+        }
 
-module.exports = { addQuestion, updateAnswerPic, updateQuestion, checkTheAnswer, getQuestionDetails, deleteQuestion, addGraphQuestion, updateAutoCorrect }
+        const questions = await questionModel.find({ level: levelNum });
+        if (questions && questions.length > 0) {
+            res.set('Cache-Control', 'public, max-age=10, s-maxage=60, stale-while-revalidate=30');
+            res.json({ message: "success", questions });
+        } else {
+            // Fallback: fetch random questions from the entire database
+            const randomQuestions = await questionModel.aggregate([{ $sample: { size: 50 } }]);
+            if (randomQuestions && randomQuestions.length > 0) {
+                res.set('Cache-Control', 'public, max-age=5, s-maxage=10');
+                res.json({ message: "success", questions: randomQuestions });
+            } else {
+                res.json({ message: "no questions found in the database" });
+            }
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+}
+
+// ── Math evaluator utility for auto-correction ───────────────────────────────
+function evaluateMath(expression) {
+    if (!expression || typeof expression !== 'string') return null;
+
+    let cleaned = expression
+        .replace(/×/g, '*')
+        .replace(/x/gi, '*')
+        .replace(/÷/g, '/')
+        .replace(/=\s*\?/g, '')
+        .replace(/=\s*/g, '');
+
+    let parts = cleaned.trim().split(/\s+/);
+    let reconstructed = '';
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (i > 0) {
+            const prevPart = parts[i - 1];
+            const startsWithDigitOrDot = /^[0-9.]/.test(part);
+            const prevEndsWithOperator = /[+\-*/(]$/.test(prevPart);
+            
+            if (startsWithDigitOrDot && !prevEndsWithOperator) {
+                reconstructed += '+';
+            }
+        }
+        reconstructed += part;
+    }
+
+    const isStrictArithmetic = /^[0-9+\-*/().]+$/.test(reconstructed);
+    if (!isStrictArithmetic) {
+        return null;
+    }
+
+    try {
+        const result = Function(`"use strict"; return (${reconstructed})`)();
+        return typeof result === 'number' && !isNaN(result) ? Math.round(result * 10000) / 10000 : null;
+    } catch (err) {
+        return null;
+    }
+}
+
+// ── Negative intermediate step validator ──────────────────────────────────────
+// Parses an arithmetic question like "15 - 20 + 8 = ?" and walks left-to-right.
+// Returns { hasNegative: true, message } if the running total drops below 0 at any step.
+function hasNegativeIntermediateStep(questionText) {
+    const result = { hasNegative: false, message: '' };
+    if (!questionText || typeof questionText !== 'string') return result;
+
+    // Normalise Arabic digits to Western
+    let expr = String(questionText)
+        .replace(/[٠١٢٣٤٥٦٧٨٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+
+    // Strip everything from "=" onward (e.g. "= ?")
+    expr = expr.replace(/=.*$/, '').trim();
+
+    // Replace multiplication/division symbols (these questions are add/sub only,
+    // but if the expression has × or ÷ we skip the check — not a simple soroban chain)
+    if (/[×÷xX*\/]/i.test(expr)) return result;
+
+    // Tokenise: extract numbers and +/- operators
+    // Matches signed numbers and operators from strings like "15 - 20 + 8"
+    const tokens = expr.match(/(\d+\.?\d*|[+\-])/g);
+    if (!tokens || tokens.length === 0) return result;
+
+    let runningTotal = 0;
+    let currentOp = '+';
+    let stepIndex = 0;
+
+    for (const token of tokens) {
+        if (token === '+' || token === '-') {
+            currentOp = token;
+            continue;
+        }
+
+        const num = parseFloat(token);
+        if (isNaN(num)) continue;
+
+        if (currentOp === '+') {
+            runningTotal += num;
+        } else {
+            runningTotal -= num;
+        }
+        stepIndex++;
+
+        if (runningTotal < 0) {
+            result.hasNegative = true;
+            result.message = `لا يمكن إضافة هذا السؤال: الناتج يصبح سالباً (${runningTotal}) عند الخطوة ${stepIndex} في "${questionText}"`;
+            result.stepIndex = stepIndex;
+            result.negativeValue = runningTotal;
+            return result;
+        }
+    }
+
+    return result;
+}
+
+// ── 1. Toggle reporting a question error (Teacher Only) ──────────────────────
+const reportQuestionError = async (req, res) => {
+    try {
+        const teacherID = req.userData._id;
+        const { questionID, issueType, teacherComment } = req.body;
+
+        if (!questionID) {
+            return res.status(400).json({ message: "Question ID is required" });
+        }
+
+        // Retrieve teacher's governing School ID
+        const teacherUser = await userModel.findById(teacherID).select('createdBy');
+        if (!teacherUser) {
+            return res.status(404).json({ message: "Teacher account not found" });
+        }
+
+        const schoolID = teacherUser.createdBy || teacherID; // Fallback to teacherID if orphan
+
+        // Check if report already exists (Toggle behavior)
+        const existing = await questionReportModel.findOne({ question: questionID, reportedBy: teacherID });
+        if (existing) {
+            await questionReportModel.findByIdAndDelete(existing._id);
+            return res.json({ message: "success", status: "unreported" });
+        }
+
+        // Save new report
+        const report = new questionReportModel({
+            question: questionID,
+            reportedBy: teacherID,
+            school: schoolID,
+            issueType: issueType || 'answer',
+            teacherComment: teacherComment || ''
+        });
+
+        await report.save();
+        res.json({ message: "success", status: "reported", report });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+// ── 2. Get reported questions for the logged-in School Account ────────────────
+const getSchoolQuestionReports = async (req, res) => {
+    try {
+        const schoolID = req.userData._id;
+
+        const reports = await questionReportModel.find({ school: schoolID })
+            .populate({
+                path: 'question',
+                populate: {
+                    path: 'chapter',
+                    populate: {
+                        path: 'unit',
+                        populate: {
+                            path: 'subject'
+                        }
+                    }
+                }
+            })
+            .populate('reportedBy', 'userName email')
+            .sort({ _id: -1 });
+
+        res.json({ message: "success", reports });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+// ── 3. Resolve a reported question (School Account Only: Auto-Correct / Dismiss) 
+const resolveQuestionReport = async (req, res) => {
+    try {
+        const { reportID } = req.params;
+        const { action } = req.body; // 'correct' or 'dismiss'
+
+        const report = await questionReportModel.findById(reportID).populate('question');
+        if (!report) {
+            return res.status(404).json({ message: "Report not found" });
+        }
+
+        if (action === 'correct') {
+            const questionDoc = report.question;
+            if (!questionDoc) {
+                return res.status(404).json({ message: "Question document not found" });
+            }
+
+            // Mathematically evaluate correct solution
+            const correctValue = evaluateMath(questionDoc.question);
+            if (correctValue !== null) {
+                if (questionDoc.typeOfAnswer === 'Essay') {
+                    questionDoc.answer = [String(correctValue)];
+                } else if (questionDoc.typeOfAnswer === 'MCQ') {
+                    questionDoc.correctAnswer = String(correctValue);
+                }
+                await questionDoc.save();
+            } else {
+                return res.status(400).json({ message: "This question cannot be auto-corrected (non-mathematical content)" });
+            }
+        }
+
+        // Successfully resolved/dismissed, remove report from database
+        await questionReportModel.findByIdAndDelete(reportID);
+        res.json({ message: "success" });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+module.exports = { 
+    addQuestion, 
+    updateAnswerPic, 
+    updateQuestion, 
+    checkTheAnswer, 
+    getQuestionDetails, 
+    deleteQuestion, 
+    addGraphQuestion, 
+    updateAutoCorrect, 
+    getQuestionsByLevel,
+    reportQuestionError,
+    getSchoolQuestionReports,
+    resolveQuestionReport
+}

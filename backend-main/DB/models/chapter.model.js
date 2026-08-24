@@ -13,6 +13,16 @@ const chapterSchema = new mongoose.Schema({
         type: [mongoose.Schema.Types.ObjectId],
         ref: "question"
     },
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user",
+        default: null
+    },
+    format: {
+        type: String,
+        enum: ['MCQ', 'Completion'],
+        default: 'MCQ'
+    }
 })
 
 const chapterModel = mongoose.model('chapter', chapterSchema)

@@ -23,7 +23,7 @@ const userSchema = new mongoose.Schema({
     role: {
         type: String,
         default: "User",
-        enum: ['User', 'Admin', 'School', 'Teacher', 'Student', 'IT', 'Supervisor'] 
+        enum: ['User', 'Admin', 'Organization', 'School', 'Grade', 'Teacher', 'Student', 'IT', 'Supervisor'] 
     },
     checkresetPasswordCode:{
         type: Boolean,
@@ -41,6 +41,14 @@ const userSchema = new mongoose.Schema({
         type: [mongoose.Schema.Types.ObjectId],
         ref: "user"
     }, 
+    schoolsList:{
+        type: [mongoose.Schema.Types.ObjectId],
+        ref: "user"
+    },
+    organization:{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user"
+    },
     subject:{
         type: mongoose.Schema.Types.ObjectId,
         ref: "schoolSubject"
@@ -49,8 +57,48 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "user"
     },
+    teacher:{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user"
+    },
+    maxStudents: {
+        type: Number,
+        default: 0
+    },
     verificationCode: String,
     resetPasswordCode: String,
+    coins: {
+        type: Number,
+        default: 0
+    },
+    unlockedItems: {
+        type: [String],
+        default: []
+    },
+    currentAvatarBorder: {
+        type: String,
+        default: null
+    },
+    currentCarSkin: {
+        type: String,
+        default: null
+    },
+    currentTankSkin: {
+        type: String,
+        default: null
+    },
+    trialStartedAt: {
+        type: Date,
+        default: null
+    },
+    trialEndsAt: {
+        type: Date,
+        default: null
+    },
+    isPaid: {
+        type: Boolean,
+        default: false
+    }
 })
 
 const userModel = mongoose.model('user', userSchema)

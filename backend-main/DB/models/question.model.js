@@ -30,8 +30,18 @@ const questionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "chapter"
     },
+    level: {
+        type: Number,
+        enum: [0, 1, 2, 3],
+        default: 0
+    },
     answerPic: String,
     answerPicID: String,
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user",
+        default: null
+    },
 })
 
 const questionModel = mongoose.model('question', questionSchema)

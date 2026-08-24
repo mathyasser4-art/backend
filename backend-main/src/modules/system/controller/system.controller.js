@@ -23,6 +23,7 @@ const getAllSystem = async (req, res) => {
         
         const allSystem = await systemModel.find(query).populate('subjects')
         if (allSystem.length != 0) {
+            res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
             res.json({ message: "success", allSystem })
         } else {
             res.json({ message: "There are no system now." })
@@ -47,4 +48,40 @@ const updateSystem = async (req, res) => {
     }
 }
 
-module.exports = { addSystem, getAllSystem, updateSystem }
+const deleteSystem = async (req, res) => {
+    try {
+        const { systemID } = req.params
+        const findSystem = await systemModel.findByIdAndDelete(systemID)
+        if (findSystem) {
+            const allSystem = await systemModel.find().populate('subjects')
+            res.json({ message: "success", allSystem })
+        } else {
+            res.json({ message: "There is no system with this id." })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
+    }
+}
+
+const reorderSubjects = async (req, res) => {
+    try {
+        const { systemID } = req.params
+        const { subjects } = req.body // Expecting an array of subject IDs
+        
+        if (!Array.isArray(subjects)) {
+            return res.status(400).json({ message: 'subjects must be an array' })
+        }
+        
+        const updatedSystem = await systemModel.findByIdAndUpdate(systemID, { subjects }, { new: true })
+        if (updatedSystem) {
+            const allSystem = await systemModel.find().populate('subjects')
+            res.json({ message: 'success', allSystem })
+        } else {
+            res.json({ message: 'This system is not found' })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
+    }
+}
+
+module.exports = { addSystem, getAllSystem, updateSystem, deleteSystem, reorderSubjects }

@@ -6,9 +6,21 @@ const login = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const findUser = await userModel.findOne({ email });
+        if (!email || !password) {
+            return res.json({ message: 'Incorrect username or password' });
+        }
+
+        const query = {
+            $or: [
+                { email: email.toLowerCase() },
+                { userName: email },
+                { email: email }
+            ]
+        };
+
+        const findUser = await userModel.findOne(query).populate('createdBy');
         if (!findUser) {
-            return res.json({ message: 'This email is not registered' });
+            return res.json({ message: 'Incorrect username or password' });
         }
 
         if (!findUser.verify) {
@@ -21,7 +33,19 @@ const login = async (req, res) => {
 
         const isPasswordMatch = await bcrypt.compare(password, findUser.password);
         if (!isPasswordMatch) {
-            return res.json({ message: 'Incorrect password' });
+            return res.json({ message: 'Incorrect username or password' });
+        }
+
+        const { checkAndApplyTopsorobanTrial } = require('../../../services/topsorobanTrial.service');
+        const trialResult = await checkAndApplyTopsorobanTrial(findUser);
+        if (trialResult.isExpired) {
+            return res.json({ message: trialResult.message || 'Your 30-day free trial for Topsoroban has expired. Please contact support to unlock your account.' });
+        }
+
+        let remainingDays = null;
+        if (findUser.trialEndsAt) {
+            const diffMs = new Date(findUser.trialEndsAt).getTime() - Date.now();
+            remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
         }
 
         const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
@@ -30,7 +54,12 @@ const login = async (req, res) => {
             userToken,
             userName: findUser.userName,
             role: findUser.role,
-            userID: findUser._id
+            userID: findUser._id,
+            createdBy: findUser.createdBy,
+            trialStartedAt: findUser.trialStartedAt,
+            trialEndsAt: findUser.trialEndsAt,
+            isPaid: findUser.isPaid,
+            remainingDays
         });
     } catch (error) {
         res.status(502).json({ message: error.message });

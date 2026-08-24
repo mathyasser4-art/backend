@@ -3,7 +3,12 @@ const mongoose = require('mongoose');
 const connectionDB = () => {
     const connectionString = 'mongodb+srv://abacus_db_user:Csk2k0ar6tVcBduq@cluster0.1z1lw9l.mongodb.net/abacus?appName=Cluster0';
 
-    return mongoose.connect(connectionString)
+    return mongoose.connect(connectionString, {
+        maxPoolSize: 100,
+        minPoolSize: 10,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+    })
         .then(() => {
             console.log('connection db is running...');
         })

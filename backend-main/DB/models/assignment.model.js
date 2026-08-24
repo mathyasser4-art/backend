@@ -22,8 +22,6 @@ const assignmentSchema = new mongoose.Schema({
     createdAt: String,
     title: String,
     timer: Number,
-    startDate: String,
-    endDate: String,
     attemptsNumber: Number,
     totalPoints: Number,
 })

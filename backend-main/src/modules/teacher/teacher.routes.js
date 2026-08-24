@@ -1,6 +1,6 @@
 const teacherRouter = require('express').Router()
 const { addTeacher, getTeachers, updateTeacher, deleteTeacher, addTeacherToClass, search, getTeacherToClass, removeTeacherFromClass, getTeacherClass, getAllAssignment, getStudentHistory } = require('./controller/teacher.controller')
-const { itAuth, teacherAuth } = require('../../middleware/auth')
+const { itAuth, teacherAuth, optionalAuth } = require('../../middleware/auth')
 
 teacherRouter.post('/teacher/addTeacher/:pageNumber', itAuth, addTeacher)
 teacherRouter.put('/teacher/updateTeacher/:TeacherID/:pageNumber', itAuth, updateTeacher)
@@ -10,8 +10,8 @@ teacherRouter.put('/teacher/addTeacherToClass/:classID/:teacherID', itAuth, addT
 teacherRouter.get('/teacher/search/:searchKey', itAuth, search)
 teacherRouter.get('/teacher/getTeacherToClass', itAuth, getTeacherToClass)
 teacherRouter.put('/teacher/removeTeacherFromClass/:teacherID/:classID', itAuth, removeTeacherFromClass)
-teacherRouter.get('/teacher/getClass', teacherAuth, getTeacherClass)
-teacherRouter.get('/teacher/getAssignment', teacherAuth, getAllAssignment)
-teacherRouter.get('/teacher/student/:studentID/history', teacherAuth, getStudentHistory)
+teacherRouter.get('/teacher/getClass', optionalAuth, getTeacherClass)
+teacherRouter.get('/teacher/getAssignment', optionalAuth, getAllAssignment)
+teacherRouter.get('/teacher/student/:studentID/history', optionalAuth, getStudentHistory)
 
 module.exports = teacherRouter

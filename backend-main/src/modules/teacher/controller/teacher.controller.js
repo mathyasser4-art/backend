@@ -1,4 +1,5 @@
 const userModel = require('../../../../DB/models/user.model')
+// Teacher assignment & student history controller with elapsed active time tracking
 const classModel = require('../../../../DB/models/class.model')
 const assignmentModel = require('../../../../DB/models/assignment.model')
 const answerModel = require('../../../../DB/models/answer.model')
@@ -11,8 +12,8 @@ const getTeachers = async (req, res) => {
     try {
         const { pageNumber } = req.params
         const skippedNumber = (pageNumber - 1) * 20
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
         const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
         if (allTeachers.length != 0) {
             res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
@@ -27,7 +28,7 @@ const getTeachers = async (req, res) => {
 const addTeacher = async (req, res) => {
     try {
         const { userName, password } = req.body
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findTeacher = await userModel.findOne({ userName, role: 'Teacher', createdBy: schoolID })
         if (findTeacher) {
             res.json({ message: "This teacher name is already registered" })
@@ -46,7 +47,7 @@ const addTeacher = async (req, res) => {
             const addTeacher = new userModel(req.body)
             await addTeacher.save()
             const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
-            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
             res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
         }
     } catch (error) {
@@ -68,9 +69,9 @@ const updateTeacher = async (req, res) => {
         const updateTeacher = await userModel.findByIdAndUpdate(TeacherID, req.body)
         if (updateTeacher) {
             const skippedNumber = (pageNumber - 1) * 20
-            const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+            const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
             const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
-            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+            const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
             res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
         } else {
             res.json({ message: "This teacher is not found" })
@@ -104,9 +105,9 @@ const deleteTeacher = async (req, res) => {
                 }
                 await assignmentModel.deleteMany({ createdBy: deleteTeacher._id })
                 const skippedNumber = (pageNumber - 1) * 20
-                const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+                const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
                 const countTeacher = await userModel.countDocuments({ role: "Teacher", createdBy: schoolID });
-                const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
+                const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }]).skip(skippedNumber).limit(20)
                 res.json({ message: "success", allTeachers, numberOfTeacher: countTeacher, totalPage: Math.ceil(countTeacher / 20) })
             } else {
                 res.json({ message: "an error is happend" })
@@ -126,15 +127,13 @@ const addTeacherToClass = async (req, res) => {
         if (findTeacher) {
             const findClass = await classModel.findById(classID)
             if (findClass) {
-                const isFound = findClass.teachers.filter(e => e == teacherID)[0]
+                const isFound = findClass.teachers.some(e => e.toString() === teacherID.toString())
                 if (isFound) {
                     res.json({ message: "This teacher is already added to this class" })
                 } else {
-                    findClass.teachers.push(teacherID)
-                    await findClass.save()
-                    findTeacher.classList.push(classID)
-                    await findTeacher.save()
-                    const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+                    await classModel.findByIdAndUpdate(classID, { $addToSet: { teachers: teacherID } })
+                    await userModel.findByIdAndUpdate(teacherID, { $addToSet: { classList: classID } })
+                    const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy || req.userData._id) : req.userData._id
                     const allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
                     res.json({ message: "success", allClasses })
                 }
@@ -156,7 +155,7 @@ const removeTeacherFromClass = async (req, res) => {
         if (findTeacher) {
             const findClass = await classModel.findById(classID)
             if (findClass) {
-                const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+                const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
                 const removeFromClass = findClass.teachers.filter(e => e != teacherID)
                 const removeFromTeacher = findTeacher.classList.filter(e => e != classID)
                 findClass.teachers = removeFromClass
@@ -180,8 +179,8 @@ const removeTeacherFromClass = async (req, res) => {
 const search = async (req, res) => {
     try {
         const { searchKey } = req.params
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        let findTeacher = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Teacher", createdBy: schoolID }).select('userName email subject classList').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }])
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        let findTeacher = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Teacher", createdBy: schoolID }).select('userName email subject classList maxStudents').populate([{ path: 'classList', select: 'class' }, { path: 'subject', select: 'schoolSubjectName' }])
         if (findTeacher.length != 0) {
             res.json({ message: 'success', allTeachers: findTeacher })
         } else {
@@ -194,7 +193,7 @@ const search = async (req, res) => {
 
 const getTeacherToClass = async (req, res) => {
     try {
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const allTeachers = await userModel.find({ role: "Teacher", createdBy: schoolID }).select('userName')
         if (allTeachers.length != 0) {
             res.json({ message: 'success', allTeachers })
@@ -222,9 +221,12 @@ const getTeacherClass = async (req, res) => {
 
 const getAllAssignment = async (req, res) => {
     try {
-        const teacherID = req.userData._id
+        let teacherID = req.query.teacherID || (req.userData ? req.userData._id : null);
+        if (!teacherID) {
+            return res.status(400).json({ message: "Teacher ID required" });
+        }
         const getAssignment = await assignmentModel.find({ createdBy: teacherID }).select('-createdBy').populate([{ path: 'questions', select: '-chapter' }, { path: 'classes', select: 'class' }, { path: 'students.solveBy', select: 'userName' }]).sort({ _id: -1 })
-        if (getAssignment.length != 0) {
+        if (getAssignment && getAssignment.length != 0) {
             res.json({ message: 'success', allAssignment: getAssignment })
         } else {
             res.json({ message: 'There are no assignment available now' })
@@ -237,7 +239,7 @@ const getAllAssignment = async (req, res) => {
 const getStudentHistory = async (req, res) => {
     try {
         const { studentID } = req.params
-        const teacherID = req.userData._id
+        let teacherID = req.query.teacherID || (req.userData ? req.userData._id : null);
 
         // Find the student
         const student = await userModel.findById(studentID).select('userName email')
@@ -245,12 +247,13 @@ const getStudentHistory = async (req, res) => {
             return res.status(404).json({ message: 'Student not found' })
         }
 
-        // Find all answers by this student for assignments created by this teacher
+        // Find all answers by this student for assignments
+        const matchQuery = teacherID ? { createdBy: teacherID } : {};
         const studentAnswers = await answerModel.find({ solveBy: studentID })
             .populate({
                 path: 'assignment',
-                match: { createdBy: teacherID },
-                select: 'title totalPoints createdAt startDate endDate'
+                match: matchQuery,
+                select: 'title totalPoints createdAt'
             })
             .sort({ _id: -1 })
 
@@ -306,7 +309,7 @@ const getStudentHistory = async (req, res) => {
                 completedAt: answer.createdAt || answer.updatedAt || answer.assignment.createdAt,
                 totalQuestions: answer.questionsNumber || 0,
                 answeredQuestions: answer.questionsNumber || 0,
-                timeSpent: answer.timeSpent || '0:00'
+                timeSpent: answer.time || '0:00'
             }
         })
 

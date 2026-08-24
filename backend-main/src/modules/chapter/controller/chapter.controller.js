@@ -1,18 +1,88 @@
 const chapterModel = require('../../../../DB/models/chapter.model')
 const unitModel = require('../../../../DB/models/unit.model')
 const questionModel = require('../../../../DB/models/question.model')
+const userModel = require('../../../../DB/models/user.model')
+const jwt = require('jsonwebtoken')
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
 const mongoose = require('mongoose')
+const { shuffleAndBalanceMCQ } = require('../../../services/mcqShuffle.service')
 
 const getChapterQuestion = async (req, res) => {
-    const { chapterID } = req.params
-    const chapter = await chapterModel.findById(chapterID).select("-unit").populate('questions', 'question questionPic questionPoints answerPic answer correctAnswer wrongAnswer autoCorrect typeOfAnswer wrongPicAnswer correctPicAnswer')
-    if (chapter) {
-        res.json({ message: "success", chapter })
-    } else {
-        res.json({ message: "This chapter is not found" })
+    try {
+        const { chapterID } = req.params
+        const { authrization } = req.headers;
+        
+        let userId = null;
+        let userRole = null;
+        
+        if (authrization) {
+            try {
+                if (authrization.startsWith(process.env.AUTH_SECRET_KEY)) {
+                    const userToken = authrization.split(process.env.AUTH_SECRET_KEY)[1]
+                    const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY)
+                    const userFounded = await userModel.findById(id)
+                    if (userFounded) {
+                        userId = userFounded._id;
+                        userRole = userFounded.role;
+                    }
+                }
+            } catch (err) {
+                // Ignore token error (e.g. expired or invalid), serve public questions
+            }
+        }
+
+        const chapterCheck = await chapterModel.findById(chapterID);
+        if (!chapterCheck) {
+            return res.json({ message: "This chapter is not found" });
+        }
+
+        // If it's a custom chapter, verify creator ownership
+        if (chapterCheck.createdBy) {
+            if (!userId || (String(chapterCheck.createdBy) !== String(userId) && userRole !== 'Admin')) {
+                return res.status(403).json({ message: "Unauthorized access to this custom worksheet" });
+            }
+        }
+
+        // Determine question match condition:
+        // 1. If admin, see everything
+        // 2. If teacher, see global (createdBy is null/not exists) OR created by this teacher
+        // 3. Otherwise (student/guest), see only global
+        let matchQuery = {
+            $or: [
+                { createdBy: null },
+                { createdBy: { $exists: false } }
+            ]
+        };
+
+        if (userId) {
+            if (userRole === 'Admin') {
+                matchQuery = {}; // Admin sees all
+            } else if (userRole === 'Teacher' || userRole === 'School' || userRole === 'IT') {
+                matchQuery.$or.push({ createdBy: userId });
+            }
+        }
+
+        const chapter = await chapterModel.findById(chapterID)
+            .select("-unit")
+            .populate({
+                path: 'questions',
+                match: matchQuery,
+                select: 'question questionPic questionPoints answerPic answer correctAnswer wrongAnswer autoCorrect typeOfAnswer wrongPicAnswer correctPicAnswer createdBy'
+            })
+
+        if (chapter) {
+            const chapterObj = chapter.toObject();
+            if (Array.isArray(chapterObj.questions)) {
+                chapterObj.questions = shuffleAndBalanceMCQ(chapterObj.questions);
+            }
+            res.json({ message: "success", chapter: chapterObj })
+        } else {
+            res.json({ message: "This chapter is not found" })
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message })
     }
 }
 
@@ -101,4 +171,70 @@ const reorderQuestions = async (req, res) => {
     }
 }
 
-module.exports = { addChapter, getChapterQuestion, updateChapter, deleteChapter, reorderQuestions }
+const addCustomChapter = async (req, res) => {
+    try {
+        const { chapterName, format } = req.body;
+        if (!chapterName) {
+            return res.status(400).json({ message: "chapter name is required" });
+        }
+        const newChapter = new chapterModel({
+            chapterName,
+            format: format || 'MCQ',
+            createdBy: req.userData._id,
+            questions: []
+        });
+        const savedChapter = await newChapter.save();
+        res.json({ message: "success", chapter: savedChapter });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+const getCustomChapters = async (req, res) => {
+    try {
+        const chapters = await chapterModel.find({ createdBy: req.userData._id })
+            .populate('questions');
+        res.json({ message: "success", chapters });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+const deleteCustomChapter = async (req, res) => {
+    try {
+        const { chapterID } = req.params;
+        const chapter = await chapterModel.findOne({ _id: chapterID, createdBy: req.userData._id });
+        if (!chapter) {
+            return res.status(404).json({ message: "Chapter not found or unauthorized" });
+        }
+        
+        // Delete all questions associated with it
+        for (const qId of chapter.questions) {
+            const deleteQuestion = await questionModel.findByIdAndDelete(qId);
+            if (deleteQuestion) {
+                if (deleteQuestion.questionPicID) {
+                    await cloudinary.uploader.destroy(deleteQuestion.questionPicID);
+                }
+                if (deleteQuestion.answerPicID) {
+                    await cloudinary.uploader.destroy(deleteQuestion.answerPicID);
+                }
+            }
+        }
+        
+        await chapterModel.findByIdAndDelete(chapterID);
+        res.json({ message: "success" });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+module.exports = { 
+    addChapter, 
+    getChapterQuestion, 
+    updateChapter, 
+    deleteChapter, 
+    reorderQuestions,
+    addCustomChapter,
+    getCustomChapters,
+    deleteCustomChapter
+}

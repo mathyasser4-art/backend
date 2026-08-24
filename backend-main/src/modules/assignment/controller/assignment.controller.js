@@ -13,6 +13,7 @@ const createAssignment = async (req, res) => {
         req.body.createdBy = teacherID
         const addAssignment = new assignmentModel(req.body)
         await addAssignment.save()
+        
         res.json({ message: "success" })
     } catch (error) {
         res.status(502).json({ message: error.message })
@@ -109,8 +110,6 @@ const duplicateAssignment = async (req, res) => {
             title: req.body.title,
             timer: req.body.timer,
             attemptsNumber: req.body.attemptsNumber || 1,
-            startDate: req.body.startDate,
-            endDate: req.body.endDate,
             classes: req.body.classes,
             
             // New metadata
@@ -170,9 +169,15 @@ const getStudentResults = async (req, res) => {
             return res.status(404).json({ message: "Assignment not found" });
         }
 
-        // Check if teacher created this assignment
-        if (String(assignment.createdBy) !== String(teacherID)) {
-            return res.status(403).json({ message: "Access denied - You don't own this assignment" });
+        // Check permissions: allow assignment creator OR School / IT / Supervisor / Admin accounts
+        if (req.userData) {
+            const userRole = req.userData.role;
+            const isOwner = String(assignment.createdBy) === String(req.userData._id);
+            const isSchoolOrAdmin = userRole === 'School' || userRole === 'IT' || userRole === 'Supervisor' || userRole === 'Admin';
+            
+            if (!isOwner && !isSchoolOrAdmin) {
+                return res.status(403).json({ message: "Access denied - You don't have permission to view this assignment's reports" });
+            }
         }
 
         // Get all answers for this assignment with student information
@@ -197,15 +202,27 @@ const getStudentResults = async (req, res) => {
         }
 
         const students = answers.map(answer => {
-            const percentage = totalPoints > 0 ? Math.round((answer.total / totalPoints) * 100) : 0;
+            // Deduplicate questions to get the actual correct score and question count
+            const uniqueQuestionsMap = new Map();
+            answer.questions.forEach(q => {
+                if (q.question) {
+                    uniqueQuestionsMap.set(q.question.toString(), q);
+                }
+            });
+            const uniqueQuestions = Array.from(uniqueQuestionsMap.values());
+            
+            // Recalculate score from unique questions
+            const uniqueScore = uniqueQuestions.reduce((sum, q) => sum + (q.isCorrect ? (q.point || 0) : 0), 0);
+
+            const percentage = totalPoints > 0 ? Math.round((uniqueScore / totalPoints) * 100) : 0;
             
             return {
                 _id: answer._id,
                 studentId: answer.solveBy._id,
                 userName: answer.solveBy.userName,
                 email: answer.solveBy.email,
-                answeredQuestions: answer.questionsNumber,
-                score: answer.total,
+                answeredQuestions: uniqueQuestions.length,
+                score: uniqueScore,
                 totalPossible: totalPoints,
                 timeSpent: answer.time || '0:00',
                 percentage: percentage,
@@ -231,6 +248,23 @@ const getStudentResults = async (req, res) => {
     }
 };
 
+const getAssignmentByClass = async (req, res) => {
+    try {
+        const { classID } = req.params;
+        const allAssignment = await assignmentModel.find({ classes: classID })
+            .populate([{ path: 'questions', select: '-chapter -correctAnswer -questionPicID -wrongAnswerID' }, { path: 'classes', select: 'class' }, { path: 'students.solveBy', select: 'userName' }])
+            .sort({ _id: -1 });
+
+        if (allAssignment.length != 0) {
+            res.json({ message: "success", allAssignment });
+        } else {
+            res.json({ message: "There is no any assignment yet." });
+        }
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
 // FIXED: Add getStudentResults and duplicateAssignment to the exports
 module.exports = { 
     createAssignment, 
@@ -238,5 +272,6 @@ module.exports = {
     updateAssignment, 
     deleteAssignment,
     getStudentResults,
-    duplicateAssignment  // ADD THIS LINE
+    duplicateAssignment,  // ADD THIS LINE
+    getAssignmentByClass
 }

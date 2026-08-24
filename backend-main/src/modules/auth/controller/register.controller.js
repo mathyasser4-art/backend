@@ -4,35 +4,53 @@ const jwt = require('jsonwebtoken');
 
 const register = async (req, res) => {
     try {
-        const { email, password, cPassword } = req.body
-        const findUser = await userModel.findOne({ email })
-        if (!findUser) {
-            if (password == cPassword) {
-                const hashPassword = await bcrypt.hash(password, parseInt(process.env.SALTROUNDS))
-                req.body.password = hashPassword
-                req.body.verify = true // Auto-verify new users - no email verification needed
-                const addUser = new userModel(req.body)
-                const userData = await addUser.save()
-                if (userData) {
-                    // Generate token for immediate login
-                    const userToken = jwt.sign({ id: userData._id }, process.env.TOKEN_SECRET_KEY);
-                    res.status(201).json({ 
-                        message: 'success',
-                        userToken,
-                        userName: userData.userName,
-                        role: userData.role
-                    })
-                } else {
-                    res.json({ message: 'Error...This account has not been registered to our servers. Please try again' })
-                }
-            } else {
-                res.json({ message: 'the password is does not match confirm password' })
-            }
-        } else {
-            res.json({ message: 'this email is already register' })
+        const { userName, email, password, cPassword, academy } = req.body;
+        
+        if (!userName || !email || !password || !cPassword) {
+            return res.status(400).json({ message: 'All fields are required' });
         }
+        if (password !== cPassword) {
+            return res.status(400).json({ message: 'Passwords do not match' });
+        }
+        if (!academy) {
+            return res.status(400).json({ message: 'Academy is required' });
+        }
+
+        const existingUser = await userModel.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'Email already exists' });
+        }
+
+        const school = await userModel.findOne({ role: 'School', userName: academy });
+        if (!school) {
+            return res.status(400).json({ message: `Academy "${academy}" not found in database. Please contact administrator.` });
+        }
+
+        const saltRounds = parseInt(process.env.SALTROUNDS) || 10;
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        const newTeacher = new userModel({
+            userName,
+            email,
+            password: hashedPassword,
+            role: 'Teacher',
+            createdBy: school._id,
+            maxStudents: 100,
+            verify: true
+        });
+
+        await newTeacher.save();
+
+        const userToken = jwt.sign({ id: newTeacher._id }, process.env.TOKEN_SECRET_KEY);
+
+        return res.json({
+            message: 'success',
+            userToken,
+            role: newTeacher.role,
+            userName: newTeacher.userName
+        });
     } catch (error) {
-        res.status(502).json({ message: error.message })
+        return res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 }
 

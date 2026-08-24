@@ -1,19 +1,27 @@
 const userModel = require('../../../../DB/models/user.model')
 const assignmentModel = require('../../../../DB/models/assignment.model')
 const answerModel = require('../../../../DB/models/answer.model')
-const checkExpiration = require('../../../services/checkExpiration')
+
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
 const bcrypt = require('bcryptjs');
+const { shuffleAndBalanceMCQ } = require('../../../services/mcqShuffle.service');
 
 const getStudent = async (req, res) => {
     try {
         const { pageNumber } = req.params
         const skippedNumber = (pageNumber - 1) * 20
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
-        const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
+            return res.json({ message: "Your account is not linked to any school." })
+        }
+        const query = { role: "Student", createdBy: schoolID }
+        if (req.userData.role === 'Teacher') {
+            query.teacher = req.userData._id
+        }
+        const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+        const countStudent = await userModel.countDocuments(query);
         if (allStudent.length != 0) {
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
         } else {
@@ -27,11 +35,27 @@ const getStudent = async (req, res) => {
 const addStudent = async (req, res) => {
     try {
         const { userName, password } = req.body
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
+            return res.json({ message: "Your account is not linked to any school. Please contact your school administrator to link your account before creating students." })
+        }
         const findStudent = await userModel.findOne({ userName, role: "Student", createdBy: schoolID })
         if (findStudent) {
             res.json({ message: "This student name is already registered" })
         } else {
+            if (req.userData.role === 'Teacher') {
+                const maxStudents = req.userData.maxStudents;
+                if (maxStudents !== undefined && maxStudents !== null && maxStudents > 0) {
+                    const currentStudentCount = await userModel.countDocuments({
+                        role: "Student",
+                        createdBy: schoolID,
+                        teacher: req.userData._id
+                    });
+                    if (currentStudentCount >= maxStudents) {
+                        return res.json({ message: `You have reached your limit of ${maxStudents} students.` });
+                    }
+                }
+            }
             const { pageNumber } = req.params
             const skippedNumber = (pageNumber - 1) * 20
             try {
@@ -43,10 +67,17 @@ const addStudent = async (req, res) => {
             req.body.verify = true
             req.body.role = 'Student'
             req.body.createdBy = schoolID
+            if (req.userData.role === 'Teacher') {
+                req.body.teacher = req.userData._id
+            }
             const addStudent = new userModel(req.body)
             await addStudent.save()
-            const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
-            const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
+            const query = { role: "Student", createdBy: schoolID }
+            if (req.userData.role === 'Teacher') {
+                query.teacher = req.userData._id
+            }
+            const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+            const countStudent = await userModel.countDocuments(query);
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
         }
     } catch (error) {
@@ -57,6 +88,16 @@ const addStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
+            return res.json({ message: "Your account is not linked to any school." })
+        }
+        if (req.userData.role === 'Teacher') {
+            const verifyStudent = await userModel.findOne({ _id: studentID, role: "Student", createdBy: schoolID, teacher: req.userData._id })
+            if (!verifyStudent) {
+                return res.json({ message: "You do not have access to update this student" })
+            }
+        }
         if (req.body.password != undefined) {
             try {
                 const hashPassword = await bcrypt.hash(req.body.password, parseInt(process.env.SALTROUNDS))
@@ -68,9 +109,12 @@ const updateStudent = async (req, res) => {
         const updateStudent = await userModel.findByIdAndUpdate(studentID, req.body)
         if (updateStudent) {
             const skippedNumber = (pageNumber - 1) * 20
-            const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-            const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
-            const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+            const query = { role: "Student", createdBy: schoolID }
+            if (req.userData.role === 'Teacher') {
+                query.teacher = req.userData._id
+            }
+            const countStudent = await userModel.countDocuments(query);
+            const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
             res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
         } else {
             res.json({ message: "This student is not found" })
@@ -83,7 +127,12 @@ const updateStudent = async (req, res) => {
 const deleteStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
-        const findStudent = await userModel.findById(studentID)
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        const findStudentQuery = { _id: studentID }
+        if (req.userData.role === 'Teacher') {
+            findStudentQuery.teacher = req.userData._id
+        }
+        const findStudent = await userModel.findOne(findStudentQuery)
         if (findStudent) {
             const deleteStudent = await userModel.findByIdAndDelete(studentID)
             if (deleteStudent) {
@@ -99,9 +148,12 @@ const deleteStudent = async (req, res) => {
                 }
                 await answerModel.deleteMany({ solveBy: deleteStudent._id })
                 const skippedNumber = (pageNumber - 1) * 20
-                const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-                const countStudent = await userModel.countDocuments({ role: "Student", createdBy: schoolID });
-                const allStudent = await userModel.find({ role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+                const query = { role: "Student", createdBy: schoolID }
+                if (req.userData.role === 'Teacher') {
+                    query.teacher = req.userData._id
+                }
+                const countStudent = await userModel.countDocuments(query);
+                const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
                 res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
             } else {
                 res.json({ message: "an error is happend" })
@@ -117,12 +169,20 @@ const deleteStudent = async (req, res) => {
 const removeStudentFromClass = async (req, res) => {
     try {
         const { studentID, classID } = req.params
-        const findStudent = await userModel.findById(studentID)
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        const findStudentQuery = { _id: studentID }
+        if (req.userData.role === 'Teacher') {
+            findStudentQuery.teacher = req.userData._id
+        }
+        const findStudent = await userModel.findOne(findStudentQuery)
         if (findStudent) {
             const removeFromClass = await userModel.findByIdAndUpdate(studentID, { $unset: { class: 1 } })
             if (removeFromClass) {
-                const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-                const allStudent = await userModel.find({ createdBy: schoolID, class: classID }).select('userName')
+                const query = { createdBy: schoolID, class: classID }
+                if (req.userData.role === 'Teacher') {
+                    query.teacher = req.userData._id
+                }
+                const allStudent = await userModel.find(query).select('userName')
                 res.json({ message: "success", allStudent })
             } else {
                 res.json({ message: "an error is happend" })
@@ -138,8 +198,12 @@ const removeStudentFromClass = async (req, res) => {
 const search = async (req, res) => {
     try {
         const { searchKey } = req.params
-        const schoolID = req.userData.role == 'IT' ? req.userData.createdBy : req.userData._id
-        let findStudent = await userModel.find({ 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }).select('userName email class').populate({ path: 'class', select: 'class' })
+        const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
+        const query = { 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }
+        if (req.userData.role === 'Teacher') {
+            query.teacher = req.userData._id
+        }
+        let findStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' })
         if (findStudent.length != 0) {
             res.json({ message: 'success', allStudent: findStudent })
         } else {
@@ -187,7 +251,20 @@ const getAssignment = async (req, res) => {
                 for (let index = 0; index < getAssignment.length; index++) {
                     const element = getAssignment[index];
                     if (element.classes.includes(findStudent.class)) {
-                        allAssignment.push(element)
+                        // Check if this student has a completed answer for this assignment
+                        const completedAnswer = await answerModel.findOne({
+                            solveBy: studentID,
+                            assignment: element._id,
+                            total: { $exists: true, $ne: null }
+                        }).select('total questionsNumber').lean()
+
+                        const assignmentObj = element.toObject()
+                        assignmentObj.isCompleted = !!completedAnswer
+                        if (completedAnswer) {
+                            assignmentObj.resultScore = completedAnswer.total
+                            assignmentObj.resultTotal = completedAnswer.questionsNumber
+                        }
+                        allAssignment.push(assignmentObj)
                     }
                 }
                 res.json({ message: 'success', allAssignment })
@@ -204,31 +281,7 @@ const getAssignment = async (req, res) => {
 
 const sanitizeAssignmentQuestions = (assignmentObj) => {
     if (assignmentObj && Array.isArray(assignmentObj.questions)) {
-        assignmentObj.questions.forEach(q => {
-            if (q.typeOfAnswer === 'MCQ' && Array.isArray(q.wrongAnswer)) {
-                const correctVal = String(q.correctAnswer || "").trim();
-                if (correctVal) {
-                    const normalizedWrong = q.wrongAnswer.map(e => String(e || "").trim());
-                    if (!normalizedWrong.includes(correctVal)) {
-                        q.wrongAnswer.push(q.correctAnswer);
-                    }
-                }
-                // Shuffle choices on the backend
-                q.wrongAnswer.sort(() => Math.random() - 0.5);
-                delete q.correctAnswer;
-            } else if (q.typeOfAnswer === 'Graph' && Array.isArray(q.wrongPicAnswer)) {
-                const correctPic = String(q.correctPicAnswer || "").trim();
-                if (correctPic) {
-                    const normalizedWrongPic = q.wrongPicAnswer.map(e => String(e || "").trim());
-                    if (!normalizedWrongPic.includes(correctPic)) {
-                        q.wrongPicAnswer.push(q.correctPicAnswer);
-                    }
-                }
-                // Shuffle choices on the backend
-                q.wrongPicAnswer.sort(() => Math.random() - 0.5);
-                delete q.correctPicAnswer;
-            }
-        });
+        assignmentObj.questions = shuffleAndBalanceMCQ(assignmentObj.questions, { sanitize: true });
     }
     return assignmentObj;
 };
@@ -239,12 +292,6 @@ const getAssignmentDetails = async (req, res) => {
         const studentID = req.userData._id
         let assignment = await assignmentModel.findById(assignmentID).select('-classes -createdBy').populate({ path: 'questions', select: '-questionPicID -wrongAnswerID -chapter' })
         if (assignment) {
-            if (assignment.startDate) {
-                if (checkExpiration(assignment.startDate, assignment.endDate)) {
-                    res.json({ message: "Oops!!You can't open this assignment, it has expired." })
-                    return;
-                }
-            }
             const findStudent = assignment.students?.filter(e => String(e.solveBy) == String(studentID))[0]
             if (findStudent) {
                 if (findStudent.attempts >= assignment.attemptsNumber) {

@@ -8,7 +8,7 @@ const addUnit = async (req, res) => {
         await addUnit.save()
         questionType = new mongoose.Types.ObjectId(questionType)
         subject = new mongoose.Types.ObjectId(subject)
-        const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName')
+        const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName questions')
         res.json({ message: "success", allUnit })
     } catch (error) {
         res.status(502).json({ message: error.message })
@@ -20,7 +20,7 @@ const getUnit = async (req, res) => {
         const { questionTypeID, subjectID } = req.params
         const questionType = new mongoose.Types.ObjectId(questionTypeID)
         const subject = new mongoose.Types.ObjectId(subjectID)
-        const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName')
+        const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName questions')
         if (allUnit.length != 0) {
             res.json({ message: "success", allUnit })
         } else {
@@ -39,7 +39,7 @@ const updateUnit = async (req, res) => {
         if (updateUnit) {
             const subject = new mongoose.Types.ObjectId(subjectID)
             const questionType = new mongoose.Types.ObjectId(questionTypeID)
-            const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName')
+            const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName questions')
             res.json({ message: "success", allUnit })
         } else {
             res.json({ message: "An Error is happend Faild to update" })
@@ -58,7 +58,7 @@ const deleteUnit = async (req, res) => {
                 await unitModel.findByIdAndDelete(unitID)
                 const subject = new mongoose.Types.ObjectId(subjectID)
                 const questionType = new mongoose.Types.ObjectId(questionTypeID)
-                const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName')
+                const allUnit = await unitModel.find({ questionType, subject }).select("unitName").populate('chapters', 'chapterName questions')
                 res.json({ message: "success", allUnit })
             } else {
                 res.json({ message: "To be able to delete this item package, you must first delete its items." })

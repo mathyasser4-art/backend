@@ -213,6 +213,38 @@ const getResult = async (req, res) => {
             // Mark completion time for this attempt
             if (!findAnswer.completedAt) {
                 findAnswer.completedAt = new Date();
+
+                // Economy: Award coins based on score
+                try {
+                    const userModel = require('../../../../DB/models/user.model');
+                    const student = await userModel.findById(studentID);
+                    if (student) {
+                        if (student.role === 'Teacher' || student.role === 'School') {
+                            student.coins = (student.coins || 0) + 50;
+                            await student.save();
+                            console.log(`Awarded 50 coins to teacher ${studentID} for practicing`);
+                        } else {
+                            const coinsEarned = Math.floor(findAnswer.total) || 0;
+                            if (coinsEarned > 0) {
+                                student.coins = (student.coins || 0) + coinsEarned;
+                                await student.save();
+                                console.log(`Awarded ${coinsEarned} coins to student ${studentID}`);
+                            }
+                            
+                            // Economy: Reward teacher for student completion
+                            if (assignment && assignment.createdBy) {
+                                const teacher = await userModel.findById(assignment.createdBy);
+                                if (teacher) {
+                                    teacher.coins = (teacher.coins || 0) + 10;
+                                    await teacher.save();
+                                    console.log(`Awarded 10 coins to teacher ${teacher._id} for student completion`);
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to award coins:', err);
+                }
             }
 
             await findAnswer.save();
@@ -339,47 +371,55 @@ const checkAssinmentAnswer = async (req, res) => {
         console.log('checkAssinmentAnswer - Correct answer:', question.correctAnswer || question.answer);
         console.log('checkAssinmentAnswer - Is correct:', isCorrect);
 
-        if (questionIndex > -1) {
-            // Update existing answer
-            if (question.typeOfAnswer !== 'Graph' || !req.file) {
-                // FIX: Use !== undefined and !== null to properly handle falsy values like 0 and ""
-                if (answerToSave !== undefined && answerToSave !== null) {
-                    findAnswer.questions[questionIndex].firstAnswer = answerToSave;
-                }
-                if (secondAnswer !== undefined && secondAnswer !== null) {
-                    findAnswer.questions[questionIndex].secondAnswer = secondAnswer;
-                }
-                if (thirdAnswer !== undefined && thirdAnswer !== null) {
-                    findAnswer.questions[questionIndex].thirdAnswer = thirdAnswer;
-                }
-                if (fourthAnswer !== undefined && fourthAnswer !== null) {
-                    findAnswer.questions[questionIndex].fourthAnswer = fourthAnswer;
+        // Atomic duplicate-safe database update
+        // 1. Try to update existing question answer if it exists in the array
+        const updateResult = await answerModel.updateOne(
+            {
+                _id: findAnswer._id,
+                "questions.question": questionID
+            },
+            {
+                $set: {
+                    ...(answerToSave !== undefined && answerToSave !== null && (question.typeOfAnswer !== 'Graph' || !req.file) ? { "questions.$.firstAnswer": answerToSave } : {}),
+                    ...(secondAnswer !== undefined && secondAnswer !== null ? { "questions.$.secondAnswer": secondAnswer } : {}),
+                    ...(thirdAnswer !== undefined && thirdAnswer !== null ? { "questions.$.thirdAnswer": thirdAnswer } : {}),
+                    ...(fourthAnswer !== undefined && fourthAnswer !== null ? { "questions.$.fourthAnswer": fourthAnswer } : {}),
+                    "questions.$.isCorrect": isCorrect,
+                    "questions.$.point": isCorrect ? question.questionPoints : 0,
+                    ...(question.typeOfAnswer === 'Graph' && req.file ? { "questions.$.stepPicture": { secure_url, public_id } } : {})
                 }
             }
-            findAnswer.questions[questionIndex].isCorrect = isCorrect;
-            findAnswer.questions[questionIndex].point = isCorrect ? question.questionPoints : 0;
-        } else {
-            // Add new question answer
-            // FIX: Only save answer if it's not undefined/null/empty to avoid marking as "not answered"
-            const newQuestionAnswer = {
-                question: questionID,
-                firstAnswer: (answerToSave !== undefined && answerToSave !== null && answerToSave !== '') ? answerToSave : undefined,
-                secondAnswer: (secondAnswer !== undefined && secondAnswer !== null && secondAnswer !== '') ? secondAnswer : undefined,
-                thirdAnswer: (thirdAnswer !== undefined && thirdAnswer !== null && thirdAnswer !== '') ? thirdAnswer : undefined,
-                fourthAnswer: (fourthAnswer !== undefined && fourthAnswer !== null && fourthAnswer !== '') ? fourthAnswer : undefined,
-                attempts: 1,
-                isCorrect: isCorrect,
-                point: isCorrect ? question.questionPoints : 0
-            };
+        );
 
-            if (question.typeOfAnswer === 'Graph' && req.file) {
-                newQuestionAnswer.stepPicture = { secure_url, public_id };
-            }
-            findAnswer.questions.push(newQuestionAnswer);
-            findAnswer.questionsNumber = findAnswer.questions.length;
+        if (updateResult.matchedCount === 0) {
+            // 2. If it does not exist, push it, ensuring we don't create duplicates (using $ne check)
+            await answerModel.updateOne(
+                {
+                    _id: findAnswer._id,
+                    "questions.question": { $ne: questionID }
+                },
+                {
+                    $push: {
+                        questions: {
+                            question: questionID,
+                            firstAnswer: (answerToSave !== undefined && answerToSave !== null && answerToSave !== '') ? answerToSave : undefined,
+                            secondAnswer: (secondAnswer !== undefined && secondAnswer !== null && secondAnswer !== '') ? secondAnswer : undefined,
+                            thirdAnswer: (thirdAnswer !== undefined && thirdAnswer !== null && thirdAnswer !== '') ? thirdAnswer : undefined,
+                            fourthAnswer: (fourthAnswer !== undefined && fourthAnswer !== null && fourthAnswer !== '') ? fourthAnswer : undefined,
+                            attempts: 1,
+                            isCorrect: isCorrect,
+                            point: isCorrect ? question.questionPoints : 0,
+                            ...(question.typeOfAnswer === 'Graph' && req.file ? { stepPicture: { secure_url, public_id } } : {})
+                        }
+                    }
+                }
+            );
         }
 
-        await findAnswer.save();
+        // Fetch the updated document to calculate and save questionsNumber correctly
+        const updatedAnswer = await answerModel.findById(findAnswer._id);
+        updatedAnswer.questionsNumber = updatedAnswer.questions.length;
+        await updatedAnswer.save();
 
         // #region agent log
         const savedDoc = await answerModel.findById(findAnswer._id);
@@ -459,9 +499,18 @@ const getAssignmentAnswer = async (req, res) => {
 
         console.log('Found', questions.length, 'questions in database');
 
+        // Deduplicate answers.questions by question ID, keeping the latest attempt/entry
+        const uniqueQuestionsMap = new Map();
+        answers.questions.forEach(q => {
+            if (q.question) {
+                uniqueQuestionsMap.set(q.question.toString(), q);
+            }
+        });
+        const uniqueQuestions = Array.from(uniqueQuestionsMap.values());
+
         // Build the report with question details
         const report = {
-            questions: answers.questions.map(studentAnswer => {
+            questions: uniqueQuestions.map(studentAnswer => {
                 const question = questions.find(q => q._id.toString() === studentAnswer.question.toString());
                 
                 // FIX: Check for undefined/null/empty string properly - empty string means "no answer"
@@ -492,7 +541,7 @@ const getAssignmentAnswer = async (req, res) => {
                 assignment: answers.assignment,
                 time: answers.time || "0:00",
                 total: answers.total || 0,
-                questionsNumber: answers.questionsNumber || 0
+                questionsNumber: uniqueQuestions.length
             },
             report
         });
@@ -582,9 +631,18 @@ const getStudentOwnReport = async (req, res) => {
             _id: { $in: answers.questions.map(q => q.question) }
         });
 
+        // Deduplicate answers.questions by question ID, keeping the latest attempt/entry
+        const uniqueQuestionsMap = new Map();
+        answers.questions.forEach(q => {
+            if (q.question) {
+                uniqueQuestionsMap.set(q.question.toString(), q);
+            }
+        });
+        const uniqueQuestions = Array.from(uniqueQuestionsMap.values());
+
         // Build the report with question details
         const report = {
-            questions: answers.questions.map(studentAnswer => {
+            questions: uniqueQuestions.map(studentAnswer => {
                 const question = questions.find(q => q._id.toString() === studentAnswer.question.toString());
                 
                 // FIX: Check for undefined/null/empty string properly - empty string means "no answer"
@@ -612,7 +670,7 @@ const getStudentOwnReport = async (req, res) => {
                 assignment: answers.assignment,
                 time: answers.time || "0:00",
                 total: answers.total || 0,
-                questionsNumber: answers.questionsNumber || 0
+                questionsNumber: uniqueQuestions.length
             },
             report
         });
