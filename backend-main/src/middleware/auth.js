@@ -388,6 +388,25 @@ const organizationAuth = async (req, res, next) => {
     }
 }
 
+const optionalAuth = async (req, res, next) => {
+    try {
+        const { authrization } = req.headers;
+        if (authrization && authrization.startsWith(process.env.AUTH_SECRET_KEY)) {
+            const userToken = authrization.split(process.env.AUTH_SECRET_KEY)[1];
+            if (userToken && userToken !== 'null' && userToken !== 'undefined') {
+                const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY);
+                const userFounded = await userModel.findById(id);
+                if (userFounded && userFounded.verify && !userFounded.block && !userFounded.disable) {
+                    req.userData = userFounded;
+                }
+            }
+        }
+        next();
+    } catch (error) {
+        next();
+    }
+};
+
 module.exports = { userAuth, adminAuth, teacherAuth, studentAuth, schoolAuth, itAuth, supervisorAuth, organizationAuth, generalAuth, itOrTeacherAuth, optionalAuth }
 
 
