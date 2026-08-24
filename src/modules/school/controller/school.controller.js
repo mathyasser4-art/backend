@@ -4,7 +4,7 @@ const schoolSubjectModel = require('../../../../DB/models/schoolSubject.model')
 const bcrypt = require('bcryptjs');
 
 const getSchool = async (req, res) => {
-    const allSchools = await userModel.find({ role: "School" }).select('userName email disable')
+    const allSchools = await userModel.find({ role: { $in: ["School", "Grade"] } }).select('userName email disable role')
     if (allSchools.length != 0) {
         res.json({ message: "success", allSchools })
     } else {
@@ -17,7 +17,7 @@ const addSchool = async (req, res) => {
         const { userName, password } = req.body
         const findSchool = await userModel.findOne({ userName })
         if (findSchool) {
-            res.json({ message: "This school name is already registered" })
+            res.json({ message: "This name is already registered" })
         } else {
             try {
                 const hashPassword = await bcrypt.hash(password, parseInt(process.env.SALTROUNDS))
@@ -26,10 +26,10 @@ const addSchool = async (req, res) => {
                 return res.status(500).json({ message: 'Error hashing password' })
             }
             req.body.verify = true
-            req.body.role = 'School'
+            req.body.role = req.body.role || 'Grade'
             const addSchool = new userModel(req.body)
             await addSchool.save()
-            const allSchools = await userModel.find({ role: "School" }).select('userName email disable')
+            const allSchools = await userModel.find({ role: { $in: ["School", "Grade"] } }).select('userName email disable role')
             res.json({ message: "success", allSchools })
         }
     } catch (error) {
@@ -50,10 +50,10 @@ const updateSchool = async (req, res) => {
         }
         const updateSchool = await userModel.findByIdAndUpdate(schoolID, req.body)
         if (updateSchool) {
-            const allSchools = await userModel.find({ role: "School" }).select('userName email disable')
+            const allSchools = await userModel.find({ role: { $in: ["School", "Grade"] } }).select('userName email disable role')
             res.json({ message: "success", allSchools })
         } else {
-            res.json({ message: "This school is not found" })
+            res.json({ message: "This account is not found" })
         }
     } catch (error) {
         res.status(502).json({ message: error.message })
@@ -78,13 +78,13 @@ const deleteSchool = async (req, res) => {
                         res.json({ message: "There are many subjects linked to this account, so delete this subjects first." })
                     } else {
                         await userModel.findByIdAndDelete(schoolID)
-                        const allSchools = await userModel.find({ role: "School" }).select('userName email disable')
+                        const allSchools = await userModel.find({ role: { $in: ["School", "Grade"] } }).select('userName email disable role')
                         res.json({ message: "success", allSchools })
                     }
                 }
             }
         } else {
-            res.json({ message: "This school is not found" })
+            res.json({ message: "This account is not found" })
         }
     } catch (error) {
         res.status(502).json({ message: error.message })
@@ -103,10 +103,10 @@ const disableSchool = async (req, res) => {
                 await userModel.findByIdAndUpdate(schoolID, { disable: true })
                 await userModel.updateMany({ createdBy: schoolID }, { disable: true })
             }
-            const allSchools = await userModel.find({ role: "School" }).select('userName email disable')
+            const allSchools = await userModel.find({ role: { $in: ["School", "Grade"] } }).select('userName email disable role')
             res.json({ message: "success", allSchools })
         } else {
-            res.json({ message: "This school is not found" })
+            res.json({ message: "This account is not found" })
         }
     } catch (error) {
         res.status(502).json({ message: error.message })

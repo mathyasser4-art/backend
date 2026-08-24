@@ -169,7 +169,7 @@ const schoolAuth = async (req, res, next) => {
                 if (userFounded) {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
-                            if (userFounded.role == 'School' && userFounded.disable == false) {
+                            if ((userFounded.role == 'School' || userFounded.role == 'Grade') && userFounded.disable == false) {
                                 req.userData = userFounded
                                 next()
                             } else {
@@ -206,7 +206,7 @@ const itAuth = async (req, res, next) => {
                 if (userFounded) {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
-                            if ((userFounded.role == 'IT' || userFounded.role == 'School') && userFounded.disable == false) {
+                            if ((userFounded.role == 'IT' || userFounded.role == 'School' || userFounded.role == 'Grade') && userFounded.disable == false) {
                                 req.userData = userFounded
                                 next()
                             } else {
@@ -321,7 +321,7 @@ const itOrTeacherAuth = async (req, res, next) => {
                 if (userFounded) {
                     if (userFounded.verify) {
                         if (!userFounded.block) {
-                            if ((userFounded.role == 'IT' || userFounded.role == 'School' || userFounded.role == 'Teacher') && userFounded.disable == false) {
+                            if ((userFounded.role == 'IT' || userFounded.role == 'School' || userFounded.role == 'Grade' || userFounded.role == 'Teacher') && userFounded.disable == false) {
                                 const trialResult = await checkAndApplyTopsorobanTrial(userFounded);
                                 if (trialResult.isExpired) {
                                     return res.json({ message: trialResult.message || 'Your account has been disabled due to trial expiration.' });
