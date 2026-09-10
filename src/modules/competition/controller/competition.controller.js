@@ -31,11 +31,18 @@ const createCompetition = async (req, res) => {
             return res.status(400).json({ message: "Competition title is required" });
         }
 
+        let validatedTimer = Number(timer) || 300;
+        // If teacher entered 1-15 (meaning minutes), convert to seconds
+        if (validatedTimer > 0 && validatedTimer <= 15) {
+            validatedTimer = validatedTimer * 60;
+        }
+        validatedTimer = Math.max(60, validatedTimer); // Enforce minimum 60 seconds
+
         const newCompetition = new competitionModel({
             title,
             createdBy: teacherID,
             questions: questions || [],
-            timer: timer || 300, // default 5 minutes
+            timer: validatedTimer,
             status: 'lobby',
             participants: []
         });
@@ -157,6 +164,15 @@ const getCompetitionDetails = async (req, res) => {
             competitionObj = sanitizeCompetitionQuestions(competitionObj);
         }
 
+        const serverNow = Date.now();
+        let remainingSeconds = competitionObj.timer || 300;
+        if (competitionObj.status === 'active' && competitionObj.startedAt) {
+            const elapsed = Math.max(0, Math.floor((serverNow - new Date(competitionObj.startedAt).getTime()) / 1000));
+            remainingSeconds = Math.max(0, (competitionObj.timer || 300) - elapsed);
+        }
+        competitionObj.remainingSeconds = remainingSeconds;
+        competitionObj.serverNow = serverNow;
+
         res.json({ message: "success", competition: competitionObj });
     } catch (error) {
         res.status(502).json({ message: error.message });
@@ -264,9 +280,14 @@ const startCompetition = async (req, res) => {
             return res.status(400).json({ message: "Competition is already started or finished" });
         }
 
+        const serverNow = Date.now();
         competition.status = 'active';
-        competition.startedAt = new Date(Date.now() + 3000);
+        competition.startedAt = new Date(serverNow + 3000);
         await competition.save();
+
+        let compObj = competition.toObject();
+        compObj.remainingSeconds = competition.timer;
+        compObj.serverNow = serverNow;
 
         // Economy: Reward teacher for starting a battle
         try {
@@ -283,10 +304,12 @@ const startCompetition = async (req, res) => {
         await pusher.trigger(`competition-${competitionId}`, 'start-competition', {
             startedAt: competition.startedAt,
             timer: competition.timer,
+            remainingSeconds: competition.timer,
+            serverNow: serverNow,
             questionsCount: competition.questions.length
         });
 
-        res.json({ message: "success", competition });
+        res.json({ message: "success", competition: compObj });
     } catch (error) {
         res.status(502).json({ message: error.message });
     }
