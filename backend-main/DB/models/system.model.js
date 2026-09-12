@@ -13,6 +13,10 @@ const systemSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    isVisible: {
+        type: Boolean,
+        default: true
+    }
 })
 
 const systemModel = mongoose.model('system', systemSchema)

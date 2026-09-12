@@ -4,6 +4,10 @@ const subjectSchema = new mongoose.Schema({
     subjectName: {
         type: String,
         required: [true, 'subject name is required']
+    },
+    isVisible: {
+        type: Boolean,
+        default: true
     }
 })
 
