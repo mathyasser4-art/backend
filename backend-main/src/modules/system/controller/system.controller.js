@@ -4,7 +4,7 @@ const addSystem = async (req, res) => {
     try {
         const addSystem = new systemModel(req.body)
         await addSystem.save()
-        const allSystem = await systemModel.find().populate('subjects')
+        const allSystem = await systemModel.find().populate('subjects').populate('allowedSchools', 'userName email')
         res.json({ message: "success", allSystem })
     } catch (error) {
         res.status(502).json({ message: error.message })
@@ -21,7 +21,7 @@ const getAllSystem = async (req, res) => {
             query.questionTypeID = questionTypeID
         }
         
-        const allSystem = await systemModel.find(query).populate('subjects')
+        const allSystem = await systemModel.find(query).populate('subjects').populate('allowedSchools', 'userName email')
         if (allSystem.length != 0) {
             res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
             res.json({ message: "success", allSystem })
@@ -38,7 +38,7 @@ const updateSystem = async (req, res) => {
         const { systemID } = req.params
         const updateSystem = await systemModel.findByIdAndUpdate(systemID, req.body)
         if (updateSystem) {
-            const allSystem = await systemModel.find().populate('subjects')
+            const allSystem = await systemModel.find().populate('subjects').populate('allowedSchools', 'userName email')
             res.json({ message: "success", allSystem })
         } else {
             res.json({ message: "an error is happend." })
@@ -53,7 +53,7 @@ const deleteSystem = async (req, res) => {
         const { systemID } = req.params
         const findSystem = await systemModel.findByIdAndDelete(systemID)
         if (findSystem) {
-            const allSystem = await systemModel.find().populate('subjects')
+            const allSystem = await systemModel.find().populate('subjects').populate('allowedSchools', 'userName email')
             res.json({ message: "success", allSystem })
         } else {
             res.json({ message: "There is no system with this id." })
@@ -74,7 +74,7 @@ const reorderSubjects = async (req, res) => {
         
         const updatedSystem = await systemModel.findByIdAndUpdate(systemID, { subjects }, { new: true })
         if (updatedSystem) {
-            const allSystem = await systemModel.find().populate('subjects')
+            const allSystem = await systemModel.find().populate('subjects').populate('allowedSchools', 'userName email')
             res.json({ message: 'success', allSystem })
         } else {
             res.json({ message: 'This system is not found' })

@@ -16,7 +16,16 @@ const systemSchema = new mongoose.Schema({
     isVisible: {
         type: Boolean,
         default: true
-    }
+    },
+    visibilityMode: {
+        type: String,
+        enum: ['all', 'specific', 'none'],
+        default: 'all'
+    },
+    allowedSchools: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user"
+    }]
 })
 
 const systemModel = mongoose.model('system', systemSchema)
