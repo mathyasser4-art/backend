@@ -71,9 +71,9 @@ const checkAndApplyTopsorobanTrial = async (user) => {
         // NOW: User belongs to Topsoroban school
         const now = new Date();
 
-        // If trial has not started yet, start 30-day trial right now!
+        // If trial has not started yet, start 7-day trial right now!
         if (!user.trialStartedAt) {
-            const trialEndsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days from now
+            const trialEndsAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
             user.trialStartedAt = now;
             user.trialEndsAt = trialEndsAt;
             await userModel.updateOne(
@@ -96,7 +96,7 @@ const checkAndApplyTopsorobanTrial = async (user) => {
             return {
                 isExpired: true,
                 isTopsoroban: true,
-                message: 'Your 30-day free trial for Topsoroban has expired. Please contact support or pay to unlock your account.'
+                message: 'Your free trial for Topsoroban has expired. Please contact support or subscribe to unlock your account.'
             };
         }
 

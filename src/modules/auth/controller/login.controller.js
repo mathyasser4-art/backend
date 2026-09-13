@@ -39,7 +39,7 @@ const login = async (req, res) => {
         const { checkAndApplyTopsorobanTrial } = require('../../../services/topsorobanTrial.service');
         const trialResult = await checkAndApplyTopsorobanTrial(findUser);
         if (trialResult.isExpired) {
-            return res.json({ message: trialResult.message || 'Your 30-day free trial for Topsoroban has expired. Please contact support to unlock your account.' });
+            return res.json({ message: trialResult.message || 'Your free trial for Topsoroban has expired. Please contact support or subscribe to unlock your account.' });
         }
 
         let remainingDays = null;
