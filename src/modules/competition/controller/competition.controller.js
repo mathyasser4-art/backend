@@ -506,7 +506,11 @@ const finishCompetition = async (req, res) => {
                 const bWrong = b.wrongAnswers || 0;
                 if (aWrong !== bWrong) return aWrong - bWrong;
                 
-                return (b.totalAnswered || 0) - (a.totalAnswered || 0);
+                const aWrongFinal = a.wrongAnswers || 0;
+                const bWrongFinal = b.wrongAnswers || 0;
+                const aTotal = Math.max(a.totalAnswered || 0, (a.answers && a.answers.length) || 0, (a.score || 0) + aWrongFinal);
+                const bTotal = Math.max(b.totalAnswered || 0, (b.answers && b.answers.length) || 0, (b.score || 0) + bWrongFinal);
+                return bTotal - aTotal;
             });
             const rewards = [50, 30, 10]; // 1st, 2nd, 3rd place rewards
             
