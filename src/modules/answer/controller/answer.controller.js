@@ -259,7 +259,7 @@ const getResult = async (req, res) => {
                 message: "success",
                 result: {
                     total: findAnswer.total,
-                    questionsNumber: findAnswer.questionsNumber,
+                    questionsNumber: findAnswer.questions.length,
                     time: findAnswer.time
                 },
                 totalSummation,
