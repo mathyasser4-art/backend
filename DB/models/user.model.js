@@ -5,11 +5,13 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: [true, 'Username is required'],
         minlength: [3, 'Username must be at least 3 characters long'],
-        maxlength: [45, ' User name must not exceed 45 characters']
+        maxlength: [45, ' User name must not exceed 45 characters'],
+        index: true
     },
     email: {
         type: String,
         required: [true, 'Email is required'],
+        index: true
     },
     password: String,
     verify:{
@@ -99,7 +101,10 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     }
-})
+});
+
+userSchema.index({ userName: 1 });
+userSchema.index({ email: 1 });
 
 const userModel = mongoose.model('user', userSchema)
 module.exports = userModel
