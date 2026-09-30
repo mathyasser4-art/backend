@@ -1,11 +1,13 @@
-const userModel = require('../../../../DB/models/user.model')
+const userModel = require('../../../../DB/models/user.model');
 const jwt = require('jsonwebtoken');
 
 const userAuthroize = async (req, res) => {
     try {
-        const { userToken } = req.params
-        const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY)
-        const findUser = await userModel.findById(id).select('userName email password role verify createdBy coins unlockedItems currentAvatarBorder currentCarSkin currentTankSkin trialStartedAt trialEndsAt isPaid disable').populate({ path: 'createdBy', select: 'userName' })
+        const { userToken } = req.params;
+        const { id } = jwt.verify(userToken, process.env.TOKEN_SECRET_KEY);
+        const findUser = await userModel.findById(id)
+            .select('userName email phone password role verify createdBy coins unlockedItems currentAvatarBorder currentCarSkin currentTankSkin trialStartedAt trialEndsAt isPaid disable')
+            .populate({ path: 'createdBy', select: 'userName isPaid' });
         if (findUser) {
             if (findUser.verify) {
                 let remainingDays = null;
@@ -15,16 +17,20 @@ const userAuthroize = async (req, res) => {
                 }
                 const userObj = findUser.toObject();
                 userObj.remainingDays = remainingDays;
-                res.json({ message: 'success', userInfo: userObj, remainingDays })
+                // If the user's school / createdBy account is marked as paid, user is considered paid
+                if (findUser.createdBy && findUser.createdBy.isPaid) {
+                    userObj.isPaid = true;
+                }
+                res.json({ message: 'success', userInfo: userObj, remainingDays });
             } else {
-                res.json({ message: 'this email is not verify' })
+                res.json({ message: 'this email is not verify' });
             }
         } else {
-            res.json({ message: 'this email is not founed' })
+            res.json({ message: 'this email is not founed' });
         }
     } catch (error) {
-        res.json({ message: error.message })
+        res.json({ message: error.message });
     }
-}
+};
 
-module.exports = userAuthroize
+module.exports = userAuthroize;

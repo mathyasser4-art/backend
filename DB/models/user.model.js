@@ -100,11 +100,17 @@ const userSchema = new mongoose.Schema({
     isPaid: {
         type: Boolean,
         default: false
+    },
+    phone: {
+        type: String,
+        default: null,
+        index: true
     }
 });
 
 userSchema.index({ userName: 1 });
 userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
 
 const userModel = mongoose.model('user', userSchema)
 module.exports = userModel
