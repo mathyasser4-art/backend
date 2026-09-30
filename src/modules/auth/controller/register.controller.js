@@ -63,9 +63,17 @@ const register = async (req, res) => {
         const trialEndsAt = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000); // 3 full days
 
         let schoolId = null;
-        if (academy && academy !== 'Other') {
-            const school = await userModel.findOne({ role: 'School', userName: academy });
-            if (school) schoolId = school._id;
+        let schoolName = null;
+        if (academy) {
+            const cleanAcademy = academy.trim();
+            const school = await userModel.findOne({ 
+                role: 'School', 
+                userName: { $regex: new RegExp(`^${cleanAcademy}$`, 'i') } 
+            });
+            if (school) {
+                schoolId = school._id;
+                schoolName = school.userName;
+            }
         }
 
         const userRole = role || 'Student';
@@ -96,6 +104,9 @@ const register = async (req, res) => {
             userName: newUser.userName,
             userID: newUser._id,
             phone: newUser.phone,
+            schoolId: schoolId,
+            schoolName: schoolName || academy,
+            createdBy: schoolId ? { _id: schoolId, userName: schoolName || academy } : null,
             trialStartedAt: newUser.trialStartedAt,
             trialEndsAt: newUser.trialEndsAt,
             isPaid: newUser.isPaid,

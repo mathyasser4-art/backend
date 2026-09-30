@@ -64,9 +64,11 @@ const login = async (req, res) => {
             userID: findUser._id,
             phone: findUser.phone,
             createdBy: findUser.createdBy,
+            schoolName: findUser.createdBy?.userName || (findUser.role === 'School' ? findUser.userName : ''),
+            schoolId: findUser.createdBy?._id || (findUser.role === 'School' ? findUser._id : ''),
             trialStartedAt: findUser.trialStartedAt,
             trialEndsAt: findUser.trialEndsAt,
-            isPaid: findUser.isPaid,
+            isPaid: findUser.isPaid || (findUser.createdBy && findUser.createdBy.isPaid),
             remainingDays
         });
     } catch (error) {
