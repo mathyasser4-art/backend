@@ -10,13 +10,20 @@ const login = async (req, res) => {
             return res.json({ message: 'Incorrect username or password' });
         }
 
-        const query = {
-            $or: [
-                { email: email.toLowerCase() },
-                { userName: email },
-                { email: email }
-            ]
-        };
+        const cleanInput = email.toString().trim();
+        const cleanPhone = cleanInput.replace(/[^\d+]/g, '');
+
+        const orConditions = [
+            { email: cleanInput.toLowerCase() },
+            { userName: cleanInput },
+            { email: cleanInput }
+        ];
+        if (cleanPhone && cleanPhone.length >= 7) {
+            orConditions.push({ phone: cleanPhone });
+            orConditions.push({ phone: cleanInput });
+        }
+
+        const query = { $or: orConditions };
 
         const findUser = await userModel.findOne(query).populate('createdBy');
         if (!findUser) {
@@ -55,6 +62,7 @@ const login = async (req, res) => {
             userName: findUser.userName,
             role: findUser.role,
             userID: findUser._id,
+            phone: findUser.phone,
             createdBy: findUser.createdBy,
             trialStartedAt: findUser.trialStartedAt,
             trialEndsAt: findUser.trialEndsAt,

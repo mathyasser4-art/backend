@@ -1,7 +1,11 @@
 const userModel = require('../../DB/models/user.model');
 
+// Lockout cutoff: October 1, 2026 00:00:00 (UTC+3 Egypt timezone)
+const LOCKOUT_CUTOFF = new Date('2026-10-01T00:00:00+03:00');
+
 /**
- * Checks if a user belongs to Topsoroban School and handles 30-day trial logic.
+ * Checks if a user or their organization has an active subscription or valid trial.
+ * Enforces platform lockout starting October 1, 2026.
  * @param {Object} user - The user object from database (Mongoose document).
  * @returns {Promise<{ isExpired: boolean, isTopsoroban: boolean, message?: string }>}
  */
@@ -9,98 +13,53 @@ const checkAndApplyTopsorobanTrial = async (user) => {
     try {
         if (!user) return { isExpired: false, isTopsoroban: false };
 
-        // Only enforce on Student and Teacher roles
-        if (user.role !== 'Student' && user.role !== 'Teacher') {
+        // Admin accounts are never locked
+        if (user.role === 'Admin') {
             return { isExpired: false, isTopsoroban: false };
         }
 
         // If user is explicitly marked as paid, allow access
         if (user.isPaid) {
-            return { isExpired: false, isTopsoroban: true };
-        }
-
-        // Determine if user belongs to Topsoroban
-        let isTopsoroban = false;
-
-        // 1. Check createdBy or school
-        let createdByDoc = null;
-        if (user.createdBy) {
-            if (typeof user.createdBy === 'object' && user.createdBy.userName) {
-                createdByDoc = user.createdBy;
-            } else {
-                createdByDoc = await userModel.findById(user.createdBy).select('userName role createdBy');
-            }
-        }
-
-        if (createdByDoc) {
-            if (/topsoroban/i.test(createdByDoc.userName)) {
-                isTopsoroban = true;
-            } else if (createdByDoc.createdBy) {
-                const parentSchool = await userModel.findById(createdByDoc.createdBy).select('userName');
-                if (parentSchool && /topsoroban/i.test(parentSchool.userName)) {
-                    isTopsoroban = true;
-                }
-            }
-        }
-
-        // 2. If student has a teacher assigned, check teacher's school
-        if (!isTopsoroban && user.teacher) {
-            let teacherDoc = null;
-            if (typeof user.teacher === 'object' && user.teacher.userName) {
-                teacherDoc = user.teacher;
-            } else {
-                teacherDoc = await userModel.findById(user.teacher).select('userName createdBy');
-            }
-
-            if (teacherDoc) {
-                if (/topsoroban/i.test(teacherDoc.userName)) {
-                    isTopsoroban = true;
-                } else if (teacherDoc.createdBy) {
-                    const teacherSchool = await userModel.findById(teacherDoc.createdBy).select('userName');
-                    if (teacherSchool && /topsoroban/i.test(teacherSchool.userName)) {
-                        isTopsoroban = true;
-                    }
-                }
-            }
-        }
-
-        if (!isTopsoroban) {
             return { isExpired: false, isTopsoroban: false };
         }
 
-        // NOW: User belongs to Topsoroban school
-        const now = new Date();
-
-        // If trial has not started yet, start 7-day trial right now!
-        if (!user.trialStartedAt) {
-            const trialEndsAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
-            user.trialStartedAt = now;
-            user.trialEndsAt = trialEndsAt;
-            await userModel.updateOne(
-                { _id: user._id },
-                { $set: { trialStartedAt: now, trialEndsAt: trialEndsAt } }
-            );
-            return { isExpired: false, isTopsoroban: true };
+        // Check if the user belongs to a school that has paid
+        if (user.createdBy) {
+            let schoolDoc = null;
+            if (typeof user.createdBy === 'object' && user.createdBy.isPaid !== undefined) {
+                schoolDoc = user.createdBy;
+            } else {
+                schoolDoc = await userModel.findById(user.createdBy).select('userName role isPaid createdBy');
+            }
+            if (schoolDoc && schoolDoc.isPaid) {
+                return { isExpired: false, isTopsoroban: false };
+            }
+            if (schoolDoc && schoolDoc.createdBy) {
+                const parentSchool = await userModel.findById(schoolDoc.createdBy).select('isPaid');
+                if (parentSchool && parentSchool.isPaid) {
+                    return { isExpired: false, isTopsoroban: false };
+                }
+            }
         }
 
-        // Check if trial has expired
-        if (user.trialEndsAt && now > new Date(user.trialEndsAt)) {
-            // Lock account automatically if expired
-            if (!user.disable) {
-                user.disable = true;
-                await userModel.updateOne(
-                    { _id: user._id },
-                    { $set: { disable: true } }
-                );
-            }
+        const now = new Date();
+
+        // If the user has an active free trial (e.g. 3-day trial from registration)
+        if (user.trialEndsAt && now < new Date(user.trialEndsAt)) {
+            return { isExpired: false, isTopsoroban: false };
+        }
+
+        // Check if we have passed the October 1st midnight lockout deadline
+        if (now >= LOCKOUT_CUTOFF) {
             return {
                 isExpired: true,
-                isTopsoroban: true,
-                message: 'Your free trial for Topsoroban has expired. Please contact support or subscribe to unlock your account.'
+                isTopsoroban: false,
+                message: 'Platform subscription required starting October 1st, 2026. Please upgrade your account via WhatsApp (+201505252676) or visit /pricing to continue.'
             };
         }
 
-        return { isExpired: false, isTopsoroban: true };
+        // Before cutoff, allow access
+        return { isExpired: false, isTopsoroban: false };
     } catch (error) {
         console.error('Error in checkAndApplyTopsorobanTrial:', error);
         return { isExpired: false, isTopsoroban: false };
