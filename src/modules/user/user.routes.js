@@ -26,10 +26,11 @@ userRouter.post('/user/equipItem', generalAuth, equipItem)
 userRouter.post('/user/tipStudent', generalAuth, tipStudent)
 
 // VIP Manager Endpoints (PIN-protected for zero-code mobile management)
-const { vipSearch, vipTogglePaid, vipCreate, vipListRecent } = require('./controller/vipManager.controller')
+const { vipSearch, vipTogglePaid, vipCreate, vipListRecent, vipStats } = require('./controller/vipManager.controller')
 userRouter.post('/user/vip/search', vipSearch)
 userRouter.post('/user/vip/toggle-paid', vipTogglePaid)
 userRouter.post('/user/vip/create', vipCreate)
 userRouter.post('/user/vip/list-recent', vipListRecent)
+userRouter.post('/user/vip/stats', vipStats)
 
 module.exports = userRouter

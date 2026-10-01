@@ -227,9 +227,67 @@ const vipListRecent = async (req, res) => {
     }
 };
 
+// 5. Overall Platform VIP & Access Stats
+const vipStats = async (req, res) => {
+    try {
+        const { pin } = req.body;
+        if (!verifyPin(pin)) {
+            return res.status(403).json({ message: 'Invalid Admin PIN' });
+        }
+
+        const now = new Date();
+        const totalUsers = await userModel.countDocuments({});
+        const paidUsers = await userModel.countDocuments({ isPaid: true });
+        const activeTrialUsers = await userModel.countDocuments({
+            trialEndsAt: { $gt: now },
+            isPaid: { $ne: true }
+        });
+        const expiredTrialUsers = await userModel.countDocuments({
+            trialEndsAt: { $lte: now },
+            isPaid: { $ne: true }
+        });
+        const legacyNoTrialUsers = await userModel.countDocuments({
+            trialEndsAt: { $exists: false },
+            isPaid: { $ne: true }
+        });
+        const disabledUsers = await userModel.countDocuments({ disable: true });
+
+        // List all paid accounts
+        const paidAccountsList = await userModel.find({ isPaid: true })
+            .select('userName phone email role paidUntil trialEndsAt createdAt')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Breakdown by role
+        const roleBreakdown = await userModel.aggregate([
+            { $group: { _id: '$role', count: { $sum: 1 } } }
+        ]);
+
+        return res.json({
+            message: 'success',
+            stats: {
+                totalUsers,
+                paidUsers,
+                activeTrialUsers,
+                totalUnlocked: paidUsers + activeTrialUsers,
+                expiredTrialUsers,
+                legacyNoTrialUsers,
+                disabledUsers,
+                roleBreakdown
+            },
+            paidAccountsList
+        });
+    } catch (error) {
+        console.error('VIP stats error:', error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 module.exports = {
     vipSearch,
     vipTogglePaid,
     vipCreate,
-    vipListRecent
+    vipListRecent,
+    vipStats
 };
+
