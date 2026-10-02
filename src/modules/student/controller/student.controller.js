@@ -11,7 +11,11 @@ const { shuffleAndBalanceMCQ } = require('../../../services/mcqShuffle.service')
 const getStudent = async (req, res) => {
     try {
         const { pageNumber } = req.params
-        const skippedNumber = (pageNumber - 1) * 20
+        const isAll = req.query.all === 'true' || pageNumber === 'all' || req.query.limit === 'all';
+        const page = parseInt(pageNumber, 10) || 1;
+        const limit = isAll ? 0 : (parseInt(req.query.limit, 10) || 20);
+        const skippedNumber = isAll ? 0 : (page - 1) * limit;
+
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
             return res.json({ message: "Your account is not linked to any school." })
@@ -20,10 +24,20 @@ const getStudent = async (req, res) => {
         if (req.userData.role === 'Teacher') {
             query.teacher = req.userData._id
         }
-        const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
+
+        let studentQuery = userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' });
+        if (!isAll && limit > 0) {
+            studentQuery = studentQuery.skip(skippedNumber).limit(limit);
+        }
+        const allStudent = await studentQuery;
         const countStudent = await userModel.countDocuments(query);
         if (allStudent.length != 0) {
-            res.json({ message: "success", allStudent, numberOfStudent: countStudent, totalPage: Math.ceil(countStudent / 20) })
+            res.json({ 
+                message: "success", 
+                allStudent, 
+                numberOfStudent: countStudent, 
+                totalPage: isAll ? 1 : Math.ceil(countStudent / (limit || 20)) 
+            });
         } else {
             res.json({ message: "There is no any student yet." })
         }
@@ -136,17 +150,25 @@ const deleteStudent = async (req, res) => {
         if (findStudent) {
             const deleteStudent = await userModel.findByIdAndDelete(studentID)
             if (deleteStudent) {
-                const findAnswer = await answerModel.find({ solveBy: deleteStudent._id })
-                for (let index = 0; index < findAnswer.length; index++) {
-                    const element = findAnswer[index];
-                    for (let index = 0; index < element.questions.length; index++) {
-                        const subElement = element.questions[index];
-                        if (subElement.stepsPicID) {
-                            await cloudinary.uploader.destroy(subElement.stepsPicID)
+                try {
+                    const findAnswer = await answerModel.find({ solveBy: deleteStudent._id })
+                    for (let index = 0; index < findAnswer.length; index++) {
+                        const element = findAnswer[index];
+                        for (let index = 0; index < element.questions.length; index++) {
+                            const subElement = element.questions[index];
+                            if (subElement.stepsPicID) {
+                                try {
+                                    await cloudinary.uploader.destroy(subElement.stepsPicID)
+                                } catch (cErr) {
+                                    console.error("Cloudinary cleanup error:", cErr.message);
+                                }
+                            }
                         }
                     }
+                    await answerModel.deleteMany({ solveBy: deleteStudent._id })
+                } catch (ansErr) {
+                    console.error("Answer cleanup error:", ansErr.message);
                 }
-                await answerModel.deleteMany({ solveBy: deleteStudent._id })
                 const skippedNumber = (pageNumber - 1) * 20
                 const query = { role: "Student", createdBy: schoolID }
                 if (req.userData.role === 'Teacher') {
