@@ -140,7 +140,15 @@ const getAllClass = async (req, res) => {
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         let allClasses
         if (req.userData.role == 'Teacher') {
-            allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
+            const teacherDoc = await userModel.findById(req.userData._id).select('classList');
+            const teacherClassIds = (teacherDoc?.classList || []);
+            allClasses = await classModel.find({
+                school: schoolID,
+                $or: [
+                    { teachers: req.userData._id },
+                    { _id: { $in: teacherClassIds } }
+                ]
+            }).populate({ path: 'teachers', select: 'userName' })
         } else {
             allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
         }
@@ -156,14 +164,25 @@ const updateClass = async (req, res) => {
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
-            if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
+            const teacherDoc = req.userData.role == 'Teacher' ? await userModel.findById(req.userData._id).select('classList') : null;
+            const isTeacherOfClass = findClass.teachers?.some(t => t.toString() === req.userData._id.toString()) ||
+                teacherDoc?.classList?.some(c => c.toString() === classID.toString());
+
+            if (req.userData.role == 'Teacher' && !isTeacherOfClass) {
                 return res.json({ message: "You do not have access to modify this class" })
             }
             const updateClass = await classModel.findByIdAndUpdate(classID, req.body)
             if (updateClass) {
                 let allClasses
                 if (req.userData.role == 'Teacher') {
-                    allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
+                    const tDoc = await userModel.findById(req.userData._id).select('classList');
+                    allClasses = await classModel.find({
+                        school: schoolID,
+                        $or: [
+                            { teachers: req.userData._id },
+                            { _id: { $in: tDoc?.classList || [] } }
+                        ]
+                    }).populate({ path: 'teachers', select: 'userName' })
                 } else {
                     allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
                 }
@@ -185,7 +204,11 @@ const removeClass = async (req, res) => {
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
-            if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
+            const teacherDoc = req.userData.role == 'Teacher' ? await userModel.findById(req.userData._id).select('classList') : null;
+            const isTeacherOfClass = findClass.teachers?.some(t => t.toString() === req.userData._id.toString()) ||
+                teacherDoc?.classList?.some(c => c.toString() === classID.toString());
+
+            if (req.userData.role == 'Teacher' && !isTeacherOfClass) {
                 return res.json({ message: "You do not have access to remove this class" })
             }
             const removeClass = await classModel.findByIdAndDelete(classID)
@@ -194,7 +217,14 @@ const removeClass = async (req, res) => {
                 await userModel.updateMany({ class: classID }, { $unset: { class: 1 } })
                 let allClasses
                 if (req.userData.role == 'Teacher') {
-                    allClasses = await classModel.find({ school: schoolID, teachers: req.userData._id }).populate({ path: 'teachers', select: 'userName' })
+                    const tDoc = await userModel.findById(req.userData._id).select('classList');
+                    allClasses = await classModel.find({
+                        school: schoolID,
+                        $or: [
+                            { teachers: req.userData._id },
+                            { _id: { $in: tDoc?.classList || [] } }
+                        ]
+                    }).populate({ path: 'teachers', select: 'userName' })
                 } else {
                     allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
                 }
@@ -216,14 +246,21 @@ const getStudent = async (req, res) => {
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
         const findClass = await classModel.findById(classID)
         if (findClass) {
-            if (req.userData.role == 'Teacher' && !findClass.teachers.some(t => t.toString() === req.userData._id.toString())) {
+            const teacherDoc = req.userData.role == 'Teacher' ? await userModel.findById(req.userData._id).select('classList') : null;
+            const isTeacherOfClass = findClass.teachers?.some(t => t.toString() === req.userData._id.toString()) ||
+                teacherDoc?.classList?.some(c => c.toString() === classID.toString());
+
+            if (req.userData.role == 'Teacher' && !isTeacherOfClass) {
                 return res.json({ message: "You do not have access to view this class's students" })
             }
-            const query = { createdBy: schoolID, class: classID }
-            if (req.userData.role === 'Teacher') {
-                query.teacher = req.userData._id
+            const query = {
+                role: 'Student',
+                $or: [
+                    { class: classID },
+                    { classList: classID }
+                ]
             }
-            const allStudent = await userModel.find(query).select('userName')
+            const allStudent = await userModel.find(query).select('userName email')
             if (allStudent.length != 0) {
                 res.json({ message: "success", allStudent })
             } else {

@@ -1,12 +1,56 @@
 const userModel = require('../../../../DB/models/user.model')
+const classModel = require('../../../../DB/models/class.model')
 const assignmentModel = require('../../../../DB/models/assignment.model')
 const answerModel = require('../../../../DB/models/answer.model')
+const mongoose = require('mongoose')
 
 const cloudinaryConfig = require('../../../services/cloudinary')
 const cloudinary = require("cloudinary").v2;
 cloudinaryConfig()
 const bcrypt = require('bcryptjs');
 const { shuffleAndBalanceMCQ } = require('../../../services/mcqShuffle.service');
+
+// Helper to find all students belonging to a teacher either directly or via assigned classes
+const getTeacherStudentQuery = async (teacherID, schoolID) => {
+    const teacherDoc = await userModel.findById(teacherID).select('classList');
+    const teacherClassIds = (teacherDoc?.classList || []).map(id => id.toString());
+
+    const classesWithTeacher = await classModel.find({
+        $or: [
+            { teachers: teacherID },
+            { _id: { $in: teacherDoc?.classList || [] } }
+        ]
+    }).select('_id');
+
+    classesWithTeacher.forEach(c => {
+        const cStr = c._id.toString();
+        if (!teacherClassIds.includes(cStr)) {
+            teacherClassIds.push(cStr);
+        }
+    });
+
+    const classObjectIds = teacherClassIds.map(id => new mongoose.Types.ObjectId(id));
+
+    const orClauses = [
+        { teacher: teacherID },
+        { teacherList: teacherID },
+        { class: { $in: classObjectIds } },
+        { classList: { $in: classObjectIds } }
+    ];
+
+    if (schoolID) {
+        orClauses.forEach(clause => {
+            if (clause.teacher || clause.teacherList) {
+                clause.createdBy = schoolID;
+            }
+        });
+    }
+
+    return {
+        role: "Student",
+        $or: orClauses
+    };
+};
 
 const getStudent = async (req, res) => {
     try {
@@ -20,9 +64,12 @@ const getStudent = async (req, res) => {
         if ((req.userData.role === 'IT' || req.userData.role === 'Teacher') && !schoolID) {
             return res.json({ message: "Your account is not linked to any school." })
         }
-        const query = { role: "Student", createdBy: schoolID }
+        
+        let query = { role: "Student" }
         if (req.userData.role === 'Teacher') {
-            query.teacher = req.userData._id
+            query = await getTeacherStudentQuery(req.userData._id, schoolID);
+        } else if (schoolID) {
+            query.createdBy = schoolID;
         }
 
         let studentQuery = userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' });
@@ -60,11 +107,8 @@ const addStudent = async (req, res) => {
             if (req.userData.role === 'Teacher') {
                 const maxStudents = req.userData.maxStudents;
                 if (maxStudents !== undefined && maxStudents !== null && maxStudents > 0) {
-                    const currentStudentCount = await userModel.countDocuments({
-                        role: "Student",
-                        createdBy: schoolID,
-                        teacher: req.userData._id
-                    });
+                    const teacherQuery = await getTeacherStudentQuery(req.userData._id, schoolID);
+                    const currentStudentCount = await userModel.countDocuments(teacherQuery);
                     if (currentStudentCount >= maxStudents) {
                         return res.json({ message: `You have reached your limit of ${maxStudents} students.` });
                     }
@@ -86,9 +130,12 @@ const addStudent = async (req, res) => {
             }
             const addStudent = new userModel(req.body)
             await addStudent.save()
-            const query = { role: "Student", createdBy: schoolID }
+
+            let query = { role: "Student" }
             if (req.userData.role === 'Teacher') {
-                query.teacher = req.userData._id
+                query = await getTeacherStudentQuery(req.userData._id, schoolID);
+            } else if (schoolID) {
+                query.createdBy = schoolID;
             }
             const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
             const countStudent = await userModel.countDocuments(query);
@@ -107,7 +154,8 @@ const updateStudent = async (req, res) => {
             return res.json({ message: "Your account is not linked to any school." })
         }
         if (req.userData.role === 'Teacher') {
-            const verifyStudent = await userModel.findOne({ _id: studentID, role: "Student", createdBy: schoolID, teacher: req.userData._id })
+            const teacherQuery = await getTeacherStudentQuery(req.userData._id, schoolID);
+            const verifyStudent = await userModel.findOne({ _id: studentID, ...teacherQuery });
             if (!verifyStudent) {
                 return res.json({ message: "You do not have access to update this student" })
             }
@@ -123,9 +171,11 @@ const updateStudent = async (req, res) => {
         const updateStudent = await userModel.findByIdAndUpdate(studentID, req.body)
         if (updateStudent) {
             const skippedNumber = (pageNumber - 1) * 20
-            const query = { role: "Student", createdBy: schoolID }
+            let query = { role: "Student" }
             if (req.userData.role === 'Teacher') {
-                query.teacher = req.userData._id
+                query = await getTeacherStudentQuery(req.userData._id, schoolID);
+            } else if (schoolID) {
+                query.createdBy = schoolID;
             }
             const countStudent = await userModel.countDocuments(query);
             const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
@@ -142,9 +192,12 @@ const deleteStudent = async (req, res) => {
     try {
         const { studentID, pageNumber } = req.params
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
-        const findStudentQuery = { _id: studentID }
+        let findStudentQuery = { _id: studentID, role: 'Student' }
         if (req.userData.role === 'Teacher') {
-            findStudentQuery.teacher = req.userData._id
+            const teacherQuery = await getTeacherStudentQuery(req.userData._id, schoolID);
+            findStudentQuery = { _id: studentID, ...teacherQuery };
+        } else if (schoolID) {
+            findStudentQuery.createdBy = schoolID;
         }
         const findStudent = await userModel.findOne(findStudentQuery)
         if (findStudent) {
@@ -170,9 +223,11 @@ const deleteStudent = async (req, res) => {
                     console.error("Answer cleanup error:", ansErr.message);
                 }
                 const skippedNumber = (pageNumber - 1) * 20
-                const query = { role: "Student", createdBy: schoolID }
+                let query = { role: "Student" }
                 if (req.userData.role === 'Teacher') {
-                    query.teacher = req.userData._id
+                    query = await getTeacherStudentQuery(req.userData._id, schoolID);
+                } else if (schoolID) {
+                    query.createdBy = schoolID;
                 }
                 const countStudent = await userModel.countDocuments(query);
                 const allStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' }).skip(skippedNumber).limit(20)
@@ -192,18 +247,18 @@ const removeStudentFromClass = async (req, res) => {
     try {
         const { studentID, classID } = req.params
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
-        const findStudentQuery = { _id: studentID }
+        let findStudentQuery = { _id: studentID, role: 'Student' }
         if (req.userData.role === 'Teacher') {
-            findStudentQuery.teacher = req.userData._id
+            const teacherQuery = await getTeacherStudentQuery(req.userData._id, schoolID);
+            findStudentQuery = { _id: studentID, ...teacherQuery };
+        } else if (schoolID) {
+            findStudentQuery.createdBy = schoolID;
         }
         const findStudent = await userModel.findOne(findStudentQuery)
         if (findStudent) {
             const removeFromClass = await userModel.findByIdAndUpdate(studentID, { $unset: { class: 1 } })
             if (removeFromClass) {
-                const query = { createdBy: schoolID, class: classID }
-                if (req.userData.role === 'Teacher') {
-                    query.teacher = req.userData._id
-                }
+                const query = { class: classID, role: 'Student' }
                 const allStudent = await userModel.find(query).select('userName')
                 res.json({ message: "success", allStudent })
             } else {
@@ -221,9 +276,15 @@ const search = async (req, res) => {
     try {
         const { searchKey } = req.params
         const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
-        const query = { 'userName': { $regex: searchKey, $options: 'i' }, role: "Student", createdBy: schoolID }
+        let query = { 'userName': { $regex: searchKey, $options: 'i' }, role: "Student" }
         if (req.userData.role === 'Teacher') {
-            query.teacher = req.userData._id
+            const teacherQuery = await getTeacherStudentQuery(req.userData._id, schoolID);
+            query = {
+                'userName': { $regex: searchKey, $options: 'i' },
+                ...teacherQuery
+            };
+        } else if (schoolID) {
+            query.createdBy = schoolID;
         }
         let findStudent = await userModel.find(query).select('userName email class').populate({ path: 'class', select: 'class' })
         if (findStudent.length != 0) {
@@ -239,20 +300,54 @@ const search = async (req, res) => {
 const getClass = async (req, res) => {
     try {
         const studentID = req.userData._id
-        let findStudent = await userModel.findById(studentID).select('class').populate({
-            path: 'class',
-            select: 'class teachers',
-            populate: {
-                path: 'teachers',
+        let findStudent = await userModel.findById(studentID).select('class classList teacher teacherList').populate([
+            {
+                path: 'class',
+                select: 'class teachers',
+                populate: {
+                    path: 'teachers',
+                    select: 'userName subject',
+                    populate: {
+                        path: 'subject',
+                        select: 'schoolSubjectName',
+                    }
+                }
+            },
+            {
+                path: 'teacher',
                 select: 'userName subject',
                 populate: {
                     path: 'subject',
-                    select: 'schoolSubjectName',
+                    select: 'schoolSubjectName'
+                }
+            },
+            {
+                path: 'teacherList',
+                select: 'userName subject',
+                populate: {
+                    path: 'subject',
+                    select: 'schoolSubjectName'
                 }
             }
-        })
+        ])
         if (findStudent) {
-            res.json({ message: 'success', studentData: findStudent })
+            let teachersList = [...(findStudent.class?.teachers || [])];
+            if (findStudent.teacher && !teachersList.some(t => (t._id || t).toString() === (findStudent.teacher._id || findStudent.teacher).toString())) {
+                teachersList.push(findStudent.teacher);
+            }
+            if (findStudent.teacherList && Array.isArray(findStudent.teacherList)) {
+                findStudent.teacherList.forEach(t => {
+                    if (t && !teachersList.some(existing => (existing._id || existing).toString() === (t._id || t).toString())) {
+                        teachersList.push(t);
+                    }
+                });
+            }
+
+            const studentDataObj = findStudent.toObject ? findStudent.toObject() : { ...findStudent };
+            if (studentDataObj.class) {
+                studentDataObj.class.teachers = teachersList;
+            }
+            res.json({ message: 'success', studentData: studentDataObj })
         } else {
             res.json({ message: 'There are no student available with this id' })
         }

@@ -133,6 +133,10 @@ const addTeacherToClass = async (req, res) => {
                 } else {
                     await classModel.findByIdAndUpdate(classID, { $addToSet: { teachers: teacherID } })
                     await userModel.findByIdAndUpdate(teacherID, { $addToSet: { classList: classID } })
+                    await userModel.updateMany(
+                        { role: 'Student', $or: [{ class: classID }, { classList: classID }] },
+                        { $addToSet: { teacherList: teacherID } }
+                    )
                     const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy || req.userData._id) : req.userData._id
                     const allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
                     res.json({ message: "success", allClasses })
@@ -156,12 +160,16 @@ const removeTeacherFromClass = async (req, res) => {
             const findClass = await classModel.findById(classID)
             if (findClass) {
                 const schoolID = (req.userData.role == 'IT' || req.userData.role == 'Teacher') ? (req.userData.createdBy?._id || req.userData.createdBy) : req.userData._id
-                const removeFromClass = findClass.teachers.filter(e => e != teacherID)
-                const removeFromTeacher = findTeacher.classList.filter(e => e != classID)
+                const removeFromClass = findClass.teachers.filter(e => e.toString() !== teacherID.toString())
+                const removeFromTeacher = findTeacher.classList.filter(e => e.toString() !== classID.toString())
                 findClass.teachers = removeFromClass
                 await findClass.save()
                 findTeacher.classList = removeFromTeacher
                 await findTeacher.save()
+                await userModel.updateMany(
+                    { role: 'Student', $or: [{ class: classID }, { classList: classID }] },
+                    { $pull: { teacherList: teacherID } }
+                )
                 const newClass = await classModel.findById(classID).populate({ path: 'teachers', select: 'userName' })
                 const allClasses = await classModel.find({ school: schoolID }).populate({ path: 'teachers', select: 'userName' })
                 res.json({ message: 'success', newClass, allClasses })
@@ -208,12 +216,36 @@ const getTeacherToClass = async (req, res) => {
 const getTeacherClass = async (req, res) => {
     try {
         const teacherID = req.userData._id
-        let findTeacher = await userModel.findById(teacherID).select('classList').populate({ path: 'classList', select: 'class' })
-        if (findTeacher) {
-            res.json({ message: 'success', teacherClasess: findTeacher })
-        } else {
-            res.json({ message: 'There are no teacher available with this id' })
+        let findTeacher = await userModel.findById(teacherID).select('classList createdBy').populate({ path: 'classList', select: 'class' })
+        if (!findTeacher) {
+            return res.json({ message: 'There are no teacher available with this id' })
         }
+
+        const classesWhereTeacherIsAdded = await classModel.find({ teachers: teacherID }).select('class')
+
+        const existingClassIds = new Set((findTeacher.classList || []).map(c => (c._id || c).toString()))
+        const mergedClassList = [...(findTeacher.classList || [])]
+        const missingClassIds = []
+
+        classesWhereTeacherIsAdded.forEach(c => {
+            const cStr = c._id.toString()
+            if (!existingClassIds.has(cStr)) {
+                mergedClassList.push(c)
+                existingClassIds.add(cStr)
+                missingClassIds.push(c._id)
+            }
+        })
+
+        if (missingClassIds.length > 0) {
+            await userModel.findByIdAndUpdate(teacherID, {
+                $addToSet: { classList: { $each: missingClassIds } }
+            })
+        }
+
+        const teacherClasess = findTeacher.toObject ? findTeacher.toObject() : { ...findTeacher }
+        teacherClasess.classList = mergedClassList
+
+        res.json({ message: 'success', teacherClasess })
     } catch (error) {
         res.status(502).json({ message: error.message })
     }
