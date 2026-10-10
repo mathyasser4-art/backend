@@ -283,11 +283,54 @@ const vipStats = async (req, res) => {
     }
 };
 
+// 6. List all expired trial users for follow-up
+const vipListExpiredTrial = async (req, res) => {
+    try {
+        const { pin, limit, skip } = req.body;
+        if (!verifyPin(pin)) {
+            return res.status(403).json({ message: 'Invalid Admin PIN' });
+        }
+
+        const now = new Date();
+        const query = {
+            trialEndsAt: { $lte: now },
+            isPaid: { $ne: true }
+        };
+
+        const totalCount = await userModel.countDocuments(query);
+        let findQuery = userModel.find(query)
+            .select('userName phone email role trialStartedAt trialEndsAt createdAt disable coins createdBy')
+            .populate({ path: 'createdBy', select: 'userName role phone email' })
+            .sort({ trialEndsAt: -1 })
+            .lean();
+
+        if (limit) {
+            findQuery = findQuery.limit(parseInt(limit, 10));
+        }
+        if (skip) {
+            findQuery = findQuery.skip(parseInt(skip, 10));
+        }
+
+        const users = await findQuery;
+
+        return res.json({
+            message: 'success',
+            totalCount,
+            count: users.length,
+            users
+        });
+    } catch (error) {
+        console.error('VIP list expired trial error:', error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 module.exports = {
     vipSearch,
     vipTogglePaid,
     vipCreate,
     vipListRecent,
-    vipStats
+    vipStats,
+    vipListExpiredTrial
 };
 
