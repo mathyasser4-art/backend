@@ -25,7 +25,10 @@ const login = async (req, res) => {
 
         const query = { $or: orConditions };
 
-        const findUser = await userModel.findOne(query).populate('createdBy');
+        const findUser = await userModel.findOne(query)
+            .populate('createdBy')
+            .populate({ path: 'subject', select: 'schoolSubjectName' })
+            .populate({ path: 'assignedSystemList', select: 'systemName' });
         if (!findUser) {
             return res.json({ message: 'Incorrect username or password' });
         }
@@ -55,7 +58,15 @@ const login = async (req, res) => {
             remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
         }
 
-        const userToken = jwt.sign({ id: findUser._id }, process.env.TOKEN_SECRET_KEY);
+        const { generateUniqueReferralCode, getUnlockDetails } = require('../../../services/referral.service');
+        if (!findUser.referralCode) {
+            findUser.referralCode = await generateUniqueReferralCode();
+            await findUser.save();
+        }
+        const unlockInfo = getUnlockDetails(findUser);
+
+        const secretKey = process.env.TOKEN_SECRET_KEY || 'pracYas09_egypt_schools_token_key_2026';
+        const userToken = jwt.sign({ id: findUser._id }, secretKey);
         res.json({
             message: 'success',
             userToken,
@@ -64,12 +75,18 @@ const login = async (req, res) => {
             userID: findUser._id,
             phone: findUser.phone,
             createdBy: findUser.createdBy,
-            schoolName: findUser.createdBy?.userName || (findUser.role === 'School' ? findUser.userName : ''),
-            schoolId: findUser.createdBy?._id || (findUser.role === 'School' ? findUser._id : ''),
+            subject: findUser.subject,
+            assignedSystemList: findUser.assignedSystemList || [],
             trialStartedAt: findUser.trialStartedAt,
             trialEndsAt: findUser.trialEndsAt,
-            isPaid: findUser.isPaid || (findUser.createdBy && findUser.createdBy.isPaid),
-            remainingDays
+            isPaid: findUser.isPaid,
+            remainingDays,
+            referralCode: unlockInfo.referralCode,
+            referralCount: unlockInfo.referralCount,
+            featuresUnlockedUntil: unlockInfo.unlockedUntil,
+            sharePassExpiresAt: unlockInfo.sharePassExpiresAt,
+            isFeaturesUnlocked: unlockInfo.isUnlocked,
+            featuresRemainingDays: unlockInfo.daysRemaining
         });
     } catch (error) {
         res.status(502).json({ message: error.message });

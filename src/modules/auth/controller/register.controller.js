@@ -4,7 +4,8 @@ const jwt = require('jsonwebtoken');
 
 const register = async (req, res) => {
     try {
-        const { userName, phone, email, password, cPassword, academy, role } = req.body;
+        const { userName, phone, email, password, cPassword, academy, role, referralCode } = req.body;
+        const { generateUniqueReferralCode, applyReferralReward, isFeaturesUnlocked } = require('../../../services/referral.service');
         
         if (!userName || !password || !cPassword) {
             return res.status(400).json({ message: 'Username, password and confirm password are required' });
@@ -63,20 +64,13 @@ const register = async (req, res) => {
         const trialEndsAt = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000); // 3 full days
 
         let schoolId = null;
-        let schoolName = null;
-        if (academy) {
-            const cleanAcademy = academy.trim();
-            const school = await userModel.findOne({ 
-                role: 'School', 
-                userName: { $regex: new RegExp(`^${cleanAcademy}$`, 'i') } 
-            });
-            if (school) {
-                schoolId = school._id;
-                schoolName = school.userName;
-            }
+        if (academy && academy !== 'Other') {
+            const school = await userModel.findOne({ role: 'School', userName: academy });
+            if (school) schoolId = school._id;
         }
 
         const userRole = role || 'Student';
+        const ownReferralCode = await generateUniqueReferralCode();
 
         const newUser = new userModel({
             userName: userName.trim(),
@@ -90,8 +84,16 @@ const register = async (req, res) => {
             trialStartedAt: now,
             trialEndsAt: trialEndsAt,
             isPaid: false,
-            coins: 100 // Welcome coins bonus
+            coins: 100, // Welcome coins bonus
+            referralCode: ownReferralCode,
+            featuresUnlockedUntil: null
         });
+
+        // If registered with someone's referral code, process rewards:
+        // Referrer gets +30 Days, New Teacher gets 3-Day Welcome Trial
+        if (referralCode) {
+            await applyReferralReward(newUser, referralCode);
+        }
 
         await newUser.save();
 
@@ -104,13 +106,13 @@ const register = async (req, res) => {
             userName: newUser.userName,
             userID: newUser._id,
             phone: newUser.phone,
-            schoolId: schoolId,
-            schoolName: schoolName || academy,
-            createdBy: schoolId ? { _id: schoolId, userName: schoolName || academy } : null,
             trialStartedAt: newUser.trialStartedAt,
             trialEndsAt: newUser.trialEndsAt,
             isPaid: newUser.isPaid,
-            remainingDays: 3
+            remainingDays: 3,
+            referralCode: newUser.referralCode,
+            featuresUnlockedUntil: newUser.featuresUnlockedUntil,
+            isFeaturesUnlocked: isFeaturesUnlocked(newUser)
         });
     } catch (error) {
         console.error('Registration error:', error);

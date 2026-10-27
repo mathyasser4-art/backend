@@ -188,7 +188,7 @@ const getStudentResults = async (req, res) => {
         
         const answers = await answerModel.find({ assignment: assignmentID })
             .populate('solveBy', 'userName email')
-            .select('total questionsNumber time createdAt questions');
+            .select('total questionsNumber time createdAt updatedAt completedAt attemptNumber questions');
         
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/25a489e5-f820-4825-84a8-b9d5015821d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assignment/controller/assignment.controller.js:111',message:'getStudentResults - query result',data:{answersFound:answers?.length || 0,answersWithQuestions:answers?.filter(a => a.questions?.length > 0).length || 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STUDENT_RESULTS'})}).catch(()=>{});
@@ -200,6 +200,8 @@ const getStudentResults = async (req, res) => {
             // You might need to populate questions to get points, or use assignment.totalPoints if available
             totalPoints = assignment.totalPoints || assignment.questions.reduce((sum, q) => sum + (q.questionPoints || 0), 0);
         }
+
+        const totalQuestionsCount = assignment.questions ? assignment.questions.length : 0;
 
         const students = answers.map(answer => {
             // Deduplicate questions to get the actual correct score and question count
@@ -215,19 +217,25 @@ const getStudentResults = async (req, res) => {
             const uniqueScore = uniqueQuestions.reduce((sum, q) => sum + (q.isCorrect ? (q.point || 0) : 0), 0);
 
             const percentage = totalPoints > 0 ? Math.round((uniqueScore / totalPoints) * 100) : 0;
+            const isCompleted = !!answer.completedAt || (totalQuestionsCount > 0 && uniqueQuestions.length >= totalQuestionsCount);
+            const status = isCompleted ? 'completed' : 'in_progress';
             
             return {
                 _id: answer._id,
-                studentId: answer.solveBy._id,
-                userName: answer.solveBy.userName,
-                email: answer.solveBy.email,
+                studentId: answer.solveBy?._id || answer.solveBy,
+                userName: answer.solveBy?.userName || 'Unknown Student',
+                email: answer.solveBy?.email || '',
                 answeredQuestions: uniqueQuestions.length,
                 score: uniqueScore,
                 totalPossible: totalPoints,
                 timeSpent: answer.time || '0:00',
                 percentage: percentage,
-                completedAt: answer.createdAt,
-                totalQuestions: assignment.questions ? assignment.questions.length : 0
+                isCompleted: isCompleted,
+                status: status,
+                attemptNumber: answer.attemptNumber || 1,
+                completedAt: answer.completedAt || (isCompleted ? answer.updatedAt || answer.createdAt : null),
+                startedAt: answer.createdAt,
+                totalQuestions: totalQuestionsCount
             };
         });
 

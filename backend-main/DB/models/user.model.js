@@ -105,6 +105,30 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null,
         index: true
+    },
+    referralCode: {
+        type: String,
+        sparse: true,
+        uppercase: true,
+        trim: true,
+        index: true
+    },
+    referredBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user",
+        default: null
+    },
+    featuresUnlockedUntil: {
+        type: Date,
+        default: null
+    },
+    sharePassExpiresAt: {
+        type: Date,
+        default: null
+    },
+    referralCount: {
+        type: Number,
+        default: 0
     }
 });
 
