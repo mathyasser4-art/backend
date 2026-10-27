@@ -34,15 +34,19 @@ const vipSearch = async (req, res) => {
             orConditions.push({ phone: cleanPhone });
         }
 
+        const { isFeaturesUnlocked } = require('../../../services/referral.service');
         const user = await userModel.findOne({ $or: orConditions })
-            .select('userName phone email role isPaid disable trialStartedAt trialEndsAt coins createdAt createdBy')
+            .select('userName phone email role isPaid disable trialStartedAt trialEndsAt coins createdAt createdBy featuresUnlockedUntil sharePassExpiresAt referralCode')
             .populate({ path: 'createdBy', select: 'userName role isPaid' });
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        return res.json({ message: 'success', user });
+        const userObj = user.toObject();
+        userObj.isFeaturesUnlocked = isFeaturesUnlocked(user);
+
+        return res.json({ message: 'success', user: userObj });
     } catch (error) {
         console.error('VIP search error:', error);
         return res.status(500).json({ message: 'Server error', error: error.message });
@@ -81,6 +85,10 @@ const vipTogglePaid = async (req, res) => {
         user.isPaid = targetPaidStatus;
         if (targetPaidStatus) {
             user.disable = false;
+            user.featuresUnlockedUntil = new Date('2099-12-31T23:59:59.000Z');
+        } else {
+            user.featuresUnlockedUntil = null;
+            user.sharePassExpiresAt = null;
         }
         await user.save();
 
@@ -136,6 +144,7 @@ const vipCreate = async (req, res) => {
         if (existing) {
             existing.isPaid = true;
             existing.disable = false;
+            existing.featuresUnlockedUntil = new Date('2099-12-31T23:59:59.000Z');
             if (role) existing.role = role;
             await existing.save();
 
@@ -182,6 +191,7 @@ const vipCreate = async (req, res) => {
             isPaid: true,
             trialStartedAt: new Date(),
             trialEndsAt: new Date(Date.now() + 365 * 10 * 24 * 60 * 60 * 1000), // 10 years
+            featuresUnlockedUntil: new Date('2099-12-31T23:59:59.000Z'),
             coins: 500
         });
 
@@ -325,12 +335,69 @@ const vipListExpiredTrial = async (req, res) => {
     }
 };
 
+// Toggle features lock specifically (Lifetime unlock / lock for games & competitions)
+const vipToggleFeaturesLock = async (req, res) => {
+    try {
+        const { pin, identifier, unlock } = req.body;
+        if (!verifyPin(pin)) {
+            return res.status(403).json({ message: 'Invalid Admin PIN' });
+        }
+        if (!identifier || !identifier.trim()) {
+            return res.status(400).json({ message: 'Identifier is required' });
+        }
+
+        const cleanInput = identifier.trim();
+        const cleanPhone = cleanInput.replace(/[^\d+]/g, '');
+
+        const orConditions = [
+            { userName: cleanInput },
+            { userName: { $regex: new RegExp(`^${cleanInput}$`, 'i') } },
+            { email: cleanInput.toLowerCase() }
+        ];
+        if (cleanPhone) {
+            orConditions.push({ phone: cleanPhone });
+        }
+
+        const user = await userModel.findOne({ $or: orConditions });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const shouldUnlock = unlock !== false;
+        if (shouldUnlock) {
+            user.featuresUnlockedUntil = new Date('2099-12-31T23:59:59.000Z');
+        } else {
+            user.featuresUnlockedUntil = null;
+            user.sharePassExpiresAt = null;
+        }
+        await user.save();
+
+        const { isFeaturesUnlocked } = require('../../../services/referral.service');
+
+        return res.json({
+            message: 'success',
+            user: {
+                _id: user._id,
+                userName: user.userName,
+                phone: user.phone,
+                role: user.role,
+                featuresUnlockedUntil: user.featuresUnlockedUntil,
+                isFeaturesUnlocked: isFeaturesUnlocked(user)
+            }
+        });
+    } catch (error) {
+        console.error('VIP toggle features lock error:', error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 module.exports = {
     vipSearch,
     vipTogglePaid,
     vipCreate,
     vipListRecent,
     vipStats,
-    vipListExpiredTrial
+    vipListExpiredTrial,
+    vipToggleFeaturesLock
 };
 
