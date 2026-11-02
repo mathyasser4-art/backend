@@ -26,6 +26,9 @@ const competitionSchema = new mongoose.Schema({
     startedAt: {
         type: Date
     },
+    endedAt: {
+        type: Date
+    },
     participants: [
         {
             student: { 

@@ -6,12 +6,12 @@ const {
     deleteCompetitionEvent,
     updateCompetitionEvent
 } = require('./controller/competitionEvent.controller');
-const { teacherAuth, optionalAuth } = require('../../middleware/auth');
+const { generalAuth } = require('../../middleware/auth');
 
-competitionEventRouter.post('/competition-event/create', optionalAuth, createCompetitionEvent);
-competitionEventRouter.get('/competition-event/list', optionalAuth, getSchoolCompetitionEvents);
-competitionEventRouter.post('/competition-event/:eventId/register', optionalAuth, registerStudentsForEvent);
-competitionEventRouter.put('/competition-event/:eventId', optionalAuth, updateCompetitionEvent);
-competitionEventRouter.delete('/competition-event/:eventId', optionalAuth, deleteCompetitionEvent);
+competitionEventRouter.post('/competition-event/create', generalAuth, createCompetitionEvent);
+competitionEventRouter.get('/competition-event/list', generalAuth, getSchoolCompetitionEvents);
+competitionEventRouter.post('/competition-event/:eventId/register', generalAuth, registerStudentsForEvent);
+competitionEventRouter.put('/competition-event/:eventId', generalAuth, updateCompetitionEvent);
+competitionEventRouter.delete('/competition-event/:eventId', generalAuth, deleteCompetitionEvent);
 
 module.exports = competitionEventRouter;
