@@ -439,7 +439,7 @@ const getCompetitionStatus = async (req, res) => {
         if (!isValidId(competitionId)) {
             return res.status(404).json({ message: "Competition not found" });
         }
-        const requesterId = req.userData?._id || (isValidId(req.query.studentId) ? req.query.studentId : null);
+        const requesterId = req.userData?._id || null;
 
         const load = () => competitionModel.findById(competitionId)
             .select('status startedAt endedAt timer questions createdBy removedStudents participants.student participants.guestId participants.finishedAt');
@@ -480,11 +480,17 @@ const joinCompetition = async (req, res) => {
             return res.status(404).json({ message: "Competition not found", code: 'NOT_FOUND' });
         }
 
-        let studentID = req.userData ? req.userData._id : null;
-        let userName = req.userData ? req.userData.userName : null;
+        // Identity comes ONLY from the auth token. Accepting a studentId from the
+        // request body let anyone join (and later play) as any student.
+        if (!req.userData) {
+            return res.status(401).json({ message: "Your login session is not valid any more. Please log in again to take part in the competition.", code: 'AUTH' });
+        }
+
+        let studentID = req.userData._id;
+        let userName = req.userData.userName;
         let addedByTeacher = false;
 
-        if (req.userData && req.userData.role === 'Teacher' && req.body.studentId && String(req.body.studentId) !== String(req.userData._id)) {
+        if (req.userData.role === 'Teacher' && req.body.studentId && String(req.body.studentId) !== String(req.userData._id)) {
             // Teacher is "summoning" one of their students into the lobby
             if (!isValidId(req.body.studentId)) {
                 return res.status(400).json({ message: "Invalid student ID" });
@@ -496,22 +502,6 @@ const joinCompetition = async (req, res) => {
             studentID = foundStudent._id;
             userName = foundStudent.userName;
             addedByTeacher = true;
-        } else if (!studentID) {
-            const candidateId = req.body.studentId;
-            if (isValidId(candidateId)) {
-                try {
-                    const foundUser = await userModel.findById(candidateId).select('userName');
-                    if (foundUser) {
-                        studentID = foundUser._id;
-                        userName = foundUser.userName;
-                    }
-                } catch (e) {
-                    console.error('[JOIN] User lookup error for candidateId:', candidateId, e);
-                }
-            }
-            if (!studentID) {
-                return res.status(401).json({ message: "Guests are not allowed. Only logged-in students can join competitions. Please log in first.", code: 'AUTH' });
-            }
         }
 
         const competition = await competitionModel.findById(competitionId).select('status createdBy removedStudents participants.student participants.guestId');
@@ -662,17 +652,18 @@ const startCompetition = async (req, res) => {
 const updateLiveScore = async (req, res) => {
     try {
         const { competitionId } = req.params;
-        const { finished, finishedAt: clientFinishedAt, answers, studentId, userName } = req.body;
+        const { finished, finishedAt: clientFinishedAt, answers } = req.body;
         if (!isValidId(competitionId)) {
             return res.status(404).json({ message: "Competition not found" });
         }
 
-        let activeID = req.userData ? req.userData._id : (studentId || req.body.guestId);
-        let activeName = req.userData ? req.userData.userName : (userName || req.body.guestName || 'Guest');
-
-        if (!activeID) {
-            return res.status(403).json({ message: "User identification missing" });
+        // Identity comes ONLY from the auth token. A studentId in the body used to be
+        // accepted without a valid login, so anyone could submit answers for anyone.
+        if (!req.userData) {
+            return res.status(401).json({ message: "Your login session is not valid any more. Please log in again to take part in the competition.", code: 'AUTH' });
         }
+        const activeID = req.userData._id;
+        const activeName = req.userData.userName;
 
         const competition = await competitionModel.findById(competitionId).populate('questions');
         if (!competition) {
@@ -856,57 +847,47 @@ const finishCompetition = async (req, res) => {
     }
 };
 
-// 8. Proxy helper to broadcast real-time events for Math Racer Multiplayer Game
+// 8. Proxy helper to broadcast real-time events for the multiplayer games
+//    (Math Racer, Tanks) and the HeroTalk live classroom.
+//
+// This endpoint is public, so it must never be trusted with anything valuable.
+// It used to pay coins to whatever student IDs a request listed as the winners of
+// a "mathracer-gameover" / "tanks-gameover" event - anyone could farm unlimited
+// coins with a hand-made request (the app itself never sends those events).
+// It now only relays events on the game/classroom channels the app really uses.
+const PROXY_CHANNEL_PATTERN = /^(mathracer|tanks|herotalk)-[A-Za-z0-9_\-=@,.;]{1,150}$/
+const PROXY_EVENT_PATTERN = /^[A-Za-z0-9_\-]{1,100}$/
+const PROXY_MAX_PAYLOAD_BYTES = 10 * 1024 // Pusher rejects events over 10KB anyway
+
 const triggerMathRacerEvent = async (req, res) => {
     try {
         const { channelName, eventName, eventData } = req.body;
-        console.log(`[MATHRACER] Proxy trigger event: ${eventName} on channel: ${channelName}`);
 
-        if (typeof channelName !== 'string' || !channelName || typeof eventName !== 'string' || !eventName) {
+        if (typeof channelName !== 'string' || typeof eventName !== 'string') {
             return res.status(400).json({ message: "channelName and eventName are required" });
         }
 
-        // This proxy is unauthenticated. Competition channels and the global battle
-        // arena are server-only: otherwise anyone could fake "competition-finished",
-        // "score-updated", "student-kicked" or redirect students via "force-join-student".
-        if (channelName.startsWith('competition-') || channelName === 'global-battle-arena' || channelName.startsWith('private-') || channelName.startsWith('presence-')) {
+        // Only game rooms / live classrooms. Competition channels, the global battle
+        // arena and private/presence channels are server-only.
+        if (!PROXY_CHANNEL_PATTERN.test(channelName)) {
             return res.status(403).json({ message: "Broadcasting on this channel is not allowed" });
         }
-
-        // Economy: Award coins for finishing 1st, 2nd, 3rd in Math Racer or Tanks Game
-        if (eventName === 'mathracer-gameover' || eventName === 'tanks-gameover') {
-            let parsedData = eventData;
-            if (typeof eventData === 'string') {
-                try { parsedData = JSON.parse(eventData); } catch (e) { console.error('[MATHRACER] Failed to parse eventData:', e); }
-            }
-            if (parsedData && Array.isArray(parsedData.ranks)) {
-                const rewards = [50, 30, 10];
-                for (let i = 0; i < Math.min(parsedData.ranks.length, 3); i++) {
-                    const studentId = parsedData.ranks[i]?.id;
-                    if (studentId) {
-                        try {
-                            const student = await userModel.findById(studentId);
-                            if (student) {
-                                student.coins = (student.coins || 0) + rewards[i];
-                                await student.save();
-                                console.log(`Awarded ${rewards[i]} coins to student ${student._id} for placing #${i+1} in ${eventName}`);
-                            }
-                        } catch (err) {
-                            console.error(`Failed to award coins for ${eventName}:`, err);
-                        }
-                    }
-                }
-            }
+        if (!PROXY_EVENT_PATTERN.test(eventName) || eventName.startsWith('pusher')) {
+            return res.status(400).json({ message: "Invalid event name" });
         }
 
-        await pusher.trigger(channelName, eventName, typeof eventData === 'string' ? eventData : JSON.stringify(eventData));
+        const payload = typeof eventData === 'string' ? eventData : JSON.stringify(eventData === undefined ? {} : eventData);
+        if (Buffer.byteLength(payload, 'utf8') > PROXY_MAX_PAYLOAD_BYTES) {
+            return res.status(413).json({ message: "Event payload is too large" });
+        }
+
+        await pusher.trigger(channelName, eventName, payload);
         res.json({ message: "success" });
     } catch (error) {
         console.error('[MATHRACER] Proxy trigger error:', error.message);
         res.status(502).json({ message: error.message });
     }
 };
-
 
 // 9. Kick/Remove a participant from the competition (Teacher host only)
 const removeParticipant = async (req, res) => {
