@@ -83,12 +83,32 @@ connectionDB();
 
 // Rate limiting - Set to 1000 to support up to 100 concurrent students competing behind the same classroom NAT IP router
 const rateLimit = require('express-rate-limit');
+
+// The API runs behind Railway's proxy. Without this, req.ip is the proxy's address,
+// so every user in the world shared ONE rate-limit bucket.
+app.set('trust proxy', 1);
+
+// Live competition traffic (joins, answer syncs, status polls) is limited per
+// user instead of per IP: a whole classroom shares one IP address, and 30-100
+// students answering at once would otherwise exhaust the shared budget and get
+// their answers rejected mid-battle.
+const isCompetitionGameplay = (req) => req.path.startsWith('/competition/') && !req.path.startsWith('/competition/mathracer');
+
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 1000,
   message: 'Too many requests, please try again later',
+  skip: isCompetitionGameplay,
+});
+const competitionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300, // per student / per teacher - far above what one player can generate
+  keyGenerator: (req) => (req.headers.authrization && req.headers.authrization.length > 20) ? `auth:${req.headers.authrization}` : `ip:${req.ip}`,
+  skip: (req) => !isCompetitionGameplay(req),
+  message: { message: 'Too many requests, please try again later' },
 });
 app.use(limiter);
+app.use(competitionLimiter);
 
 const { authRouter, userRouter, systemRouter, questionTypeRouter, unitRouter, chapterRouter, questionRouter, adminRouter, subjectRouter, classRouter, schoolRouter, schoolSubjectRouter, teacherRouter, studentRouter, assignmentRouter, answerRouter, itRouter, supervisorRouter, chatRouter, competitionRouter, competitionEventRouter, organizationRouter } = require('./router/allRoutes');
 app.use(authRouter, userRouter, systemRouter, questionTypeRouter, unitRouter, chapterRouter, questionRouter, adminRouter, subjectRouter, classRouter, schoolRouter, schoolSubjectRouter, teacherRouter, studentRouter, assignmentRouter, answerRouter, itRouter, supervisorRouter, chatRouter, competitionRouter, competitionEventRouter, organizationRouter);

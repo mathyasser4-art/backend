@@ -3,6 +3,7 @@ const {
     createCompetition,
     getTeacherCompetitions,
     getCompetitionDetails,
+    getCompetitionStatus,
     joinCompetition,
     startCompetition,
     updateLiveScore,
@@ -25,6 +26,8 @@ competitionRouter.post('/competition/:competitionId/score', optionalAuth, update
 
 // Shared endpoints (accessible by both teachers and students)
 competitionRouter.get('/competition/:competitionId/details', optionalAuth, getCompetitionDetails)
+// Lightweight polling fallback used when a real-time (Pusher) event is missed
+competitionRouter.get('/competition/:competitionId/status', optionalAuth, getCompetitionStatus)
 competitionRouter.post('/competition/mathracer/trigger', triggerMathRacerEvent)
 
 module.exports = competitionRouter

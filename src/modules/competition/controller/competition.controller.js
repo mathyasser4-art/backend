@@ -13,21 +13,31 @@ const pusher = new Pusher({
   useTLS: true
 });
 
-// Normalise Eastern Arabic digits (٠١٢٣٤٥٦٧٨٩) → Western (0–9)
-const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
-const normalizeDigits = (str) => {
-    if (!str) return str
-    return String(str)
-        .replace(/[٠١٢٣٤٥٦٧٨٩]/g, d => ARABIC_DIGITS.indexOf(d).toString())
-        .trim()
-}
-
-// Grace period (seconds) after the timer / teacher end during which late
-// (in-flight) score submissions are still accepted.
-const SCORE_GRACE_SECONDS = 10
+// ─────────────────────────────────────────────────────────────────────────────
+// Timing rules (all times are SERVER time)
+//   startedAt              = moment the questions appear (3s after "Start", covers the 3-2-1)
+//   deadline               = startedAt + timer
+//   deadline + 10s         = last moment an answer submission is accepted (network latency)
+//   deadline + 15s         = competition is finalized automatically if the host hasn't ended it
+//                            (e.g. the teacher closed the tab), so ranks/coins are never stuck
+// ─────────────────────────────────────────────────────────────────────────────
+const SCORE_GRACE_MS = 10 * 1000
+const AUTO_FINALIZE_AFTER_MS = 15 * 1000
+const EARLY_START_TOLERANCE_MS = 1500
+// A "finished" timestamp sent by the client may not be older than this (anti back-dating)
+const FINISH_BACKDATE_LIMIT_MS = 20 * 1000
+const PODIUM_REWARDS = [50, 30, 10]
 
 // Fields that reveal the correct answer and must never reach a student
 const ANSWER_FIELDS = ['correctAnswer', 'answer', 'correctPicAnswer', 'answerPic', 'answerPicID']
+
+// Channel layout:
+//  competition-<id>       : everyone (start / finished / kicked)
+//  competition-<id>-host  : host teacher only (joins and live score updates). Keeping the
+//                           high-volume score events off the shared channel cuts Pusher
+//                           message usage by ~N times and keeps students' devices responsive.
+const mainChannel = (id) => `competition-${id}`
+const hostChannel = (id) => `competition-${id}-host`
 
 // Pusher rejects payloads over 10KB and a failed broadcast must never turn an
 // already-persisted DB change into a 502 for the client.
@@ -39,10 +49,196 @@ const safeTrigger = async (channel, event, data) => {
     }
 }
 
+const isValidId = (id) => !!id && mongoose.Types.ObjectId.isValid(String(id))
+
 const participantMatches = (p, id) => {
     if (!p || !id) return false
     const target = String(id)
     return (p.student && String(p.student._id || p.student) === target) || (p.guestId && String(p.guestId) === target)
+}
+
+const getDeadlineMs = (competition) => {
+    if (!competition || !competition.startedAt || !competition.timer) return null
+    return new Date(competition.startedAt).getTime() + competition.timer * 1000
+}
+
+// ── Answer checking ──────────────────────────────────────────────────────────
+const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
+const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
+const normalizeDigits = (str) => {
+    if (str === undefined || str === null) return ''
+    return String(str)
+        .replace(/[٠-٩]/g, d => String(ARABIC_DIGITS.indexOf(d)))
+        .replace(/[۰-۹]/g, d => String(PERSIAN_DIGITS.indexOf(d)))
+        .trim()
+}
+
+const normalizeText = (val) => normalizeDigits(val).toLowerCase().replace(/\s+/g, ' ').trim()
+
+// "05" == "5", "5.0" == "5", "1,000" == "1000", "−3" == "-3"
+const toComparableNumber = (val) => {
+    let str = normalizeDigits(val)
+        .replace(/[\s ]/g, '')
+        .replace(/[−–—]/g, '-')
+        .replace(/٫/g, '.')   // Arabic decimal separator
+        .replace(/٬/g, ',')   // Arabic thousands separator
+    if (/^[-+]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(str)) str = str.replace(/,/g, '')
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(str)) return null
+    const num = Number(str)
+    return Number.isFinite(num) ? num : null
+}
+
+const textAnswersMatch = (expected, given) => {
+    const a = normalizeText(expected)
+    const b = normalizeText(given)
+    if (!a || !b) return false
+    if (a === b) return true
+    const x = toComparableNumber(expected)
+    const y = toComparableNumber(given)
+    return x !== null && y !== null && x === y
+}
+
+const isAnswerCorrect = (q, studentAnswer) => {
+    if (q.typeOfAnswer === 'MCQ') {
+        const correct = normalizeText(q.correctAnswer)
+        return correct !== '' && correct === normalizeText(studentAnswer)
+    }
+    if (q.typeOfAnswer === 'Graph') {
+        const correct = String(q.correctPicAnswer || '').trim()
+        return correct !== '' && correct === String(studentAnswer || '').trim()
+    }
+    // Essay / Complete (default type)
+    return Array.isArray(q.answer) && q.answer.some(ans => textAnswersMatch(ans, studentAnswer))
+}
+
+// ── Ranking (the frontend's utils/competitionRanking.js mirrors this) ─────────
+//  1. more correct answers
+//  2. earlier finish time (completed all questions / reached final score sooner);
+//     students without a finish time come last
+//  3. fewer wrong answers
+//  4. more questions answered
+//  5. joined the lobby earlier (deterministic, never a coin flip)
+const finishMs = (p) => (p && p.finishedAt ? new Date(p.finishedAt).getTime() : Number.POSITIVE_INFINITY)
+const answeredCount = (p) => Math.max(p.totalAnswered || 0, (p.answers && p.answers.length) || 0)
+
+const rankParticipants = (participants) => (participants || [])
+    .map((p, index) => ({ p, index }))
+    .sort((a, b) => {
+        const x = a.p, y = b.p
+        if ((y.score || 0) !== (x.score || 0)) return (y.score || 0) - (x.score || 0)
+        const tx = finishMs(x), ty = finishMs(y)
+        if (tx !== ty) return tx < ty ? -1 : 1
+        if ((x.wrongAnswers || 0) !== (y.wrongAnswers || 0)) return (x.wrongAnswers || 0) - (y.wrongAnswers || 0)
+        if (answeredCount(y) !== answeredCount(x)) return answeredCount(y) - answeredCount(x)
+        const jx = x.joinedAt ? new Date(x.joinedAt).getTime() : 0
+        const jy = y.joinedAt ? new Date(y.joinedAt).getTime() : 0
+        if (jx !== jy) return jx - jy
+        return a.index - b.index
+    })
+    .map(entry => entry.p)
+
+// ── Finalization (shared by the teacher's "End" and the automatic expiry) ─────
+const finalizeCompetition = async (competitionId, { teacherID = null } = {}) => {
+    const now = new Date()
+    const filter = { _id: competitionId, status: { $ne: 'finished' } }
+    if (teacherID) filter.createdBy = teacherID
+
+    // Atomic transition: only one caller (manual End, the teacher's timer, an
+    // automatic expiry, a retry...) does the work, so coins are awarded exactly once.
+    // From this moment every score update is rejected, so the ranking is frozen.
+    const transitioned = await competitionModel.findOneAndUpdate(
+        filter,
+        { $set: { status: 'finished', endedAt: now } },
+        { new: true }
+    )
+    if (!transitioned) return false
+
+    const deadlineMs = getDeadlineMs(transitioned)
+    const stampMs = deadlineMs ? Math.min(now.getTime(), deadlineMs) : now.getTime()
+
+    // Students who never submitted "finished" get the end time (capped at the deadline)
+    await competitionModel.updateOne(
+        { _id: competitionId },
+        { $set: { 'participants.$[unfinished].finishedAt': new Date(stampMs) } },
+        { arrayFilters: [{ 'unfinished.finishedAt': null }] }
+    )
+    if (deadlineMs) {
+        await competitionModel.updateOne(
+            { _id: competitionId },
+            { $set: { 'participants.$[late].finishedAt': new Date(deadlineMs) } },
+            { arrayFilters: [{ 'late.finishedAt': { $gt: new Date(deadlineMs) } }] }
+        )
+    }
+
+    const competition = await competitionModel.findById(competitionId)
+    const ranked = rankParticipants(competition.participants || [])
+
+    const ops = ranked.map((p, idx) => ({
+        updateOne: {
+            filter: { _id: competitionId },
+            update: {
+                $set: {
+                    'participants.$[target].finalRank': idx + 1,
+                    'participants.$[target].coinsAwarded': (idx < PODIUM_REWARDS.length && (p.score || 0) > 0) ? PODIUM_REWARDS[idx] : 0
+                }
+            },
+            arrayFilters: [{ 'target._id': p._id }]
+        }
+    }))
+    if (ops.length) {
+        await competitionModel.bulkWrite(ops)
+    }
+
+    // Economy: award coins to the top 3 (only students who scored)
+    for (let i = 0; i < Math.min(ranked.length, PODIUM_REWARDS.length); i++) {
+        const participant = ranked[i]
+        if ((participant.score || 0) <= 0) continue
+        const studentId = participant.student || (isValidId(participant.guestId) ? participant.guestId : null)
+        if (!studentId) continue
+        try {
+            await userModel.updateOne({ _id: studentId }, { $inc: { coins: PODIUM_REWARDS[i] } })
+            console.log(`Awarded ${PODIUM_REWARDS[i]} coins to student ${studentId} for placing #${i + 1}`)
+        } catch (err) {
+            console.error('Failed to award competition coins:', err)
+        }
+    }
+
+    // Tiny payload (Pusher's limit is 10KB) - clients re-fetch the results
+    await safeTrigger(mainChannel(competitionId), 'competition-finished', {
+        competitionId: String(competitionId),
+        status: 'finished',
+        endedAt: now
+    })
+    return true
+}
+
+// Finalizes an active competition whose time ran out long ago (host left / tab asleep)
+const autoFinalizeIfExpired = async (competition) => {
+    if (!competition || competition.status !== 'active') return false
+    const deadlineMs = getDeadlineMs(competition)
+    if (!deadlineMs || Date.now() <= deadlineMs + AUTO_FINALIZE_AFTER_MS) return false
+    try {
+        await finalizeCompetition(competition._id)
+        return true
+    } catch (err) {
+        console.error('[AUTO-FINALIZE] Failed:', err.message)
+        return false
+    }
+}
+
+const timingInfo = (competition) => {
+    const serverNow = Date.now()
+    let remainingSeconds = competition.timer || 300
+    const deadlineMs = getDeadlineMs(competition)
+    if (competition.status === 'active' && deadlineMs) {
+        const startMs = new Date(competition.startedAt).getTime()
+        remainingSeconds = serverNow < startMs
+            ? competition.timer
+            : Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000))
+    } else if (competition.status === 'finished') {
+        remainingSeconds = 0
+    }
+    return { serverNow, remainingSeconds, deadline: deadlineMs ? new Date(deadlineMs) : null }
 }
 
 // 1. Create a new competition lobby (Teacher only)
@@ -142,7 +338,7 @@ const getTeacherCompetitions = async (req, res) => {
 
 const sanitizeCompetitionQuestions = (competitionObj) => {
     if (competitionObj && Array.isArray(competitionObj.questions)) {
-        competitionObj.questions = shuffleAndBalanceMCQ(competitionObj.questions, { sanitize: true });
+        competitionObj.questions = shuffleAndBalanceMCQ(competitionObj.questions.filter(Boolean), { sanitize: true });
         // shuffleAndBalanceMCQ only strips the answer for the "happy path" of each
         // question type; strip every answer-revealing field unconditionally.
         competitionObj.questions.forEach(q => {
@@ -156,17 +352,27 @@ const sanitizeCompetitionQuestions = (competitionObj) => {
 const getCompetitionDetails = async (req, res) => {
     try {
         const { competitionId } = req.params;
-        const requesterId = req.userData?._id;
+        if (!isValidId(competitionId)) {
+            return res.status(404).json({ message: "Competition not found" });
+        }
+        // Identity comes from the auth token only: accepting an id from the query
+        // string would let anyone read another student's graded answers.
+        const requesterId = req.userData?._id || null;
 
-        const competition = await competitionModel.findById(competitionId)
+        const loadCompetition = () => competitionModel.findById(competitionId)
             .populate('participants.student', 'userName email')
             .populate('createdBy', 'userName email');
 
+        let competition = await loadCompetition();
         if (!competition) {
             return res.status(404).json({ message: "Competition not found" });
         }
 
-        const isTeacher = !!requesterId && String(competition.createdBy?._id || competition.createdBy) === String(requesterId);
+        if (await autoFinalizeIfExpired(competition)) {
+            competition = await loadCompetition();
+        }
+
+        const isTeacher = !!req.userData && String(competition.createdBy?._id || competition.createdBy) === String(req.userData._id);
 
         // Questions are populated with their answers for everyone: the teacher needs
         // them for reports, students need them so the MCQ shuffler can place the
@@ -177,38 +383,90 @@ const getCompetitionDetails = async (req, res) => {
         });
 
         let competitionObj = competition.toObject();
-        if (competitionObj.participants && Array.isArray(competitionObj.participants)) {
-            competitionObj.participants.forEach(p => {
-                if (!p.student && p.guestId) {
-                    p.student = {
-                        _id: p.guestId,
-                        userName: p.guestName || "Guest",
-                        email: "Guest Account"
-                    };
-                }
-            });
-        }
+        delete competitionObj.removedStudents;
+        competitionObj.questionsCount = (competitionObj.questions || []).filter(Boolean).length;
+
+        competitionObj.participants = (competitionObj.participants || []).map(p => {
+            if (!p.student && p.guestId) {
+                p.student = { _id: p.guestId, userName: p.guestName || "Guest", email: "Guest Account" };
+            } else if (!p.student) {
+                // The student's account was deleted
+                p.student = { _id: String(p._id), userName: p.guestName || "Deleted student", email: "" };
+            }
+            return p;
+        });
+
+        // Ranks: frozen final ranks once finished, live ranks while running
+        const ranked = rankParticipants(competitionObj.participants);
+        ranked.forEach((p, idx) => {
+            p.rank = (competitionObj.status === 'finished' && p.finalRank) ? p.finalRank : idx + 1;
+        });
+        competitionObj.participants = [...ranked].sort((a, b) => a.rank - b.rank);
+
         if (!isTeacher) {
-            competitionObj = sanitizeCompetitionQuestions(competitionObj);
+            if (competitionObj.status === 'lobby') {
+                // Don't hand out the questions before the start - students could
+                // work them out while waiting in the lobby.
+                competitionObj.questions = [];
+            } else {
+                competitionObj = sanitizeCompetitionQuestions(competitionObj);
+            }
             // Other participants' graded answers would reveal which answers are
-            // correct mid-battle. Students only get their own answer log.
-            (competitionObj.participants || []).forEach(p => {
+            // correct, and their emails are private. Students only see their own.
+            competitionObj.participants.forEach(p => {
                 if (!participantMatches(p, requesterId)) {
                     p.answers = [];
+                    if (p.student) p.student = { _id: p.student._id, userName: p.student.userName };
                 }
             });
+            if (competitionObj.createdBy && typeof competitionObj.createdBy === 'object') {
+                competitionObj.createdBy = { _id: competitionObj.createdBy._id, userName: competitionObj.createdBy.userName };
+            }
         }
 
-        const serverNow = Date.now();
-        let remainingSeconds = competitionObj.timer || 300;
-        if (competitionObj.status === 'active' && competitionObj.startedAt) {
-            const elapsed = Math.max(0, Math.floor((serverNow - new Date(competitionObj.startedAt).getTime()) / 1000));
-            remainingSeconds = Math.max(0, (competitionObj.timer || 300) - elapsed);
-        }
-        competitionObj.remainingSeconds = remainingSeconds;
-        competitionObj.serverNow = serverNow;
+        Object.assign(competitionObj, timingInfo(competitionObj));
 
         res.json({ message: "success", competition: competitionObj });
+    } catch (error) {
+        res.status(502).json({ message: error.message });
+    }
+};
+
+// 3b. Lightweight status poll (fallback when a Pusher event is missed)
+const getCompetitionStatus = async (req, res) => {
+    try {
+        const { competitionId } = req.params;
+        if (!isValidId(competitionId)) {
+            return res.status(404).json({ message: "Competition not found" });
+        }
+        const requesterId = req.userData?._id || (isValidId(req.query.studentId) ? req.query.studentId : null);
+
+        const load = () => competitionModel.findById(competitionId)
+            .select('status startedAt endedAt timer questions createdBy removedStudents participants.student participants.guestId participants.finishedAt');
+
+        let competition = await load();
+        if (!competition) {
+            return res.status(404).json({ message: "Competition not found" });
+        }
+        if (await autoFinalizeIfExpired(competition)) {
+            competition = await load();
+        }
+
+        const me = requesterId ? competition.participants.find(p => participantMatches(p, requesterId)) : null;
+
+        res.json({
+            message: "success",
+            status: competition.status,
+            startedAt: competition.startedAt || null,
+            endedAt: competition.endedAt || null,
+            timer: competition.timer,
+            questionsCount: (competition.questions || []).length,
+            participantsCount: competition.participants.length,
+            isParticipant: requesterId ? !!me : null,
+            isRemoved: requesterId ? (competition.removedStudents || []).some(id => String(id) === String(requesterId)) : null,
+            myFinishedAt: me ? (me.finishedAt || null) : null,
+            ...timingInfo(competition)
+        });
     } catch (error) {
         res.status(502).json({ message: error.message });
     }
@@ -218,8 +476,8 @@ const getCompetitionDetails = async (req, res) => {
 const joinCompetition = async (req, res) => {
     try {
         const { competitionId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(competitionId)) {
-            return res.status(404).json({ message: "Competition not found" });
+        if (!isValidId(competitionId)) {
+            return res.status(404).json({ message: "Competition not found", code: 'NOT_FOUND' });
         }
 
         let studentID = req.userData ? req.userData._id : null;
@@ -228,7 +486,7 @@ const joinCompetition = async (req, res) => {
 
         if (req.userData && req.userData.role === 'Teacher' && req.body.studentId && String(req.body.studentId) !== String(req.userData._id)) {
             // Teacher is "summoning" one of their students into the lobby
-            if (!mongoose.Types.ObjectId.isValid(req.body.studentId)) {
+            if (!isValidId(req.body.studentId)) {
                 return res.status(400).json({ message: "Invalid student ID" });
             }
             const foundStudent = await userModel.findById(req.body.studentId).select('userName');
@@ -240,7 +498,7 @@ const joinCompetition = async (req, res) => {
             addedByTeacher = true;
         } else if (!studentID) {
             const candidateId = req.body.studentId;
-            if (candidateId && mongoose.Types.ObjectId.isValid(candidateId)) {
+            if (isValidId(candidateId)) {
                 try {
                     const foundUser = await userModel.findById(candidateId).select('userName');
                     if (foundUser) {
@@ -252,17 +510,22 @@ const joinCompetition = async (req, res) => {
                 }
             }
             if (!studentID) {
-                return res.status(401).json({ message: "Guests are not allowed. Only logged-in students can join competitions. Please log in first." });
+                return res.status(401).json({ message: "Guests are not allowed. Only logged-in students can join competitions. Please log in first.", code: 'AUTH' });
             }
         }
 
-        const competition = await competitionModel.findById(competitionId).select('status createdBy participants.student participants.guestId');
+        const competition = await competitionModel.findById(competitionId).select('status createdBy removedStudents participants.student participants.guestId');
         if (!competition) {
-            return res.status(404).json({ message: "Competition not found" });
+            return res.status(404).json({ message: "Competition not found", code: 'NOT_FOUND' });
         }
 
         if (addedByTeacher && String(competition.createdBy) !== String(req.userData._id)) {
             return res.status(403).json({ message: "Only the host teacher can add students to this competition" });
+        }
+
+        // The host must not end up on their own leaderboard / podium
+        if (!addedByTeacher && String(competition.createdBy) === String(studentID)) {
+            return res.status(403).json({ message: "You are the host of this competition. Open it from your teacher dashboard to run it.", code: 'HOST' });
         }
 
         // A participant re-opening the page (refresh / reconnect) is always allowed
@@ -275,28 +538,39 @@ const joinCompetition = async (req, res) => {
             return res.json({ message: "success", alreadyJoined: true, competition: { _id: competition._id, status: competition.status } });
         }
 
+        if (!addedByTeacher && (competition.removedStudents || []).some(id => String(id) === String(studentID))) {
+            return res.status(403).json({ message: "You were removed from this competition by the host teacher.", code: 'REMOVED' });
+        }
+
         if (competition.status !== 'lobby') {
-            return res.status(400).json({ message: "Cannot join. Competition has already started or finished." });
+            return res.status(400).json({
+                message: competition.status === 'finished'
+                    ? "This competition has already ended."
+                    : "This competition has already started. You can no longer join it.",
+                code: competition.status === 'finished' ? 'FINISHED' : 'STARTED'
+            });
         }
 
         // Atomic conditional push: no duplicate entries when the same student
         // double-joins, and no lost joins when many students join at once.
+        const update = { $push: { participants: { student: studentID, score: 0, totalAnswered: 0, wrongAnswers: 0, answers: [], joinedAt: new Date() } } };
+        if (addedByTeacher) update.$pull = { removedStudents: studentID };
         const updated = await competitionModel.findOneAndUpdate(
             { _id: competitionId, status: 'lobby', 'participants.student': { $ne: studentID } },
-            { $push: { participants: { student: studentID, score: 0, totalAnswered: 0, wrongAnswers: 0, answers: [] } } },
+            update,
             { new: true, projection: { status: 1 } }
         );
 
         if (!updated) {
-            // Either someone else's request added this student first, or the teacher just started
+            // Either a parallel request added this student first, or the teacher just started
             const latest = await competitionModel.findById(competitionId).select('status participants.student participants.guestId');
             if (latest && latest.participants.some(p => participantMatches(p, studentID))) {
                 return res.json({ message: "success", alreadyJoined: true, competition: { _id: latest._id, status: latest.status } });
             }
-            return res.status(400).json({ message: "Cannot join. Competition has already started or finished." });
+            return res.status(400).json({ message: "This competition has already started. You can no longer join it.", code: 'STARTED' });
         }
 
-        await safeTrigger(`competition-${competitionId}`, 'student-joined', {
+        await safeTrigger(hostChannel(competitionId), 'student-joined', {
             studentId: String(studentID),
             userName: userName
         });
@@ -318,11 +592,11 @@ const startCompetition = async (req, res) => {
     try {
         const teacherID = req.userData._id;
         const { competitionId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(competitionId)) {
+        if (!isValidId(competitionId)) {
             return res.status(404).json({ message: "Competition not found" });
         }
 
-        const existing = await competitionModel.findById(competitionId).select('createdBy status questions');
+        const existing = await competitionModel.findById(competitionId).select('createdBy status questions participants.student');
         if (!existing) {
             return res.status(404).json({ message: "Competition not found" });
         }
@@ -337,6 +611,11 @@ const startCompetition = async (req, res) => {
 
         if (!existing.questions || existing.questions.length === 0) {
             return res.status(400).json({ message: "This competition has no questions" });
+        }
+
+        // Nobody can join after the start, so starting an empty lobby only wastes the battle
+        if (!existing.participants || existing.participants.length === 0) {
+            return res.status(400).json({ message: "No students have joined yet. Wait for at least one student before starting." });
         }
 
         const serverNow = Date.now();
@@ -355,6 +634,7 @@ const startCompetition = async (req, res) => {
         let compObj = competition.toObject();
         compObj.remainingSeconds = competition.timer;
         compObj.serverNow = serverNow;
+        compObj.deadline = new Date(getDeadlineMs(competition));
 
         // Economy: Reward teacher for starting a battle
         try {
@@ -364,7 +644,7 @@ const startCompetition = async (req, res) => {
         }
 
         // Broadcast "start-competition" event with start config to all listening students
-        await safeTrigger(`competition-${competitionId}`, 'start-competition', {
+        await safeTrigger(mainChannel(competitionId), 'start-competition', {
             startedAt: competition.startedAt,
             timer: competition.timer,
             remainingSeconds: competition.timer,
@@ -378,28 +658,12 @@ const startCompetition = async (req, res) => {
     }
 };
 
-const normalizeText = (val) => {
-    if (val === undefined || val === null) return "";
-    return normalizeDigits(String(val)).toLowerCase().trim();
-};
-
-const isAnswerCorrect = (q, studentAnswer) => {
-    if (q.typeOfAnswer === 'MCQ') {
-        return normalizeText(q.correctAnswer) !== "" && normalizeText(q.correctAnswer) === normalizeText(studentAnswer);
-    }
-    if (q.typeOfAnswer === 'Graph') {
-        return String(q.correctPicAnswer || "").trim() !== "" && String(q.correctPicAnswer || "").trim() === String(studentAnswer || "").trim();
-    }
-    // Essay / Complete (default type)
-    return Array.isArray(q.answer) && q.answer.map(normalizeText).includes(normalizeText(studentAnswer));
-};
-
 // 6. Submit a live score update (Student only)
 const updateLiveScore = async (req, res) => {
     try {
         const { competitionId } = req.params;
         const { finished, finishedAt: clientFinishedAt, answers, studentId, userName } = req.body;
-        if (!mongoose.Types.ObjectId.isValid(competitionId)) {
+        if (!isValidId(competitionId)) {
             return res.status(404).json({ message: "Competition not found" });
         }
 
@@ -417,36 +681,49 @@ const updateLiveScore = async (req, res) => {
 
         const nowMs = Date.now();
 
-        if (competition.status !== 'active' && competition.status !== 'finished') {
-            return res.status(400).json({ message: "Competition is not active" });
-        }
-
-        // Timer validation (grace period covers network latency of the final submit)
-        if (competition.startedAt && competition.timer) {
-            const elapsedSeconds = (nowMs - new Date(competition.startedAt).getTime()) / 1000;
-            if (elapsedSeconds > competition.timer + SCORE_GRACE_SECONDS) {
-                return res.status(400).json({ message: "Competition time has expired." });
-            }
-        }
-
-        // Students who submit just as the teacher ends the battle can still save their
-        // final score, but only within the grace window - not indefinitely afterwards.
+        // Results are frozen at the end: any later change would contradict the
+        // podium, the certificates and the coins that were already awarded.
         if (competition.status === 'finished') {
-            const endedMs = competition.endedAt ? new Date(competition.endedAt).getTime() : 0;
-            if (!endedMs || nowMs - endedMs > SCORE_GRACE_SECONDS * 1000) {
-                return res.status(400).json({ message: "Competition has already ended." });
-            }
+            return res.status(400).json({ message: "Competition has already ended.", code: 'COMPETITION_FINISHED' });
+        }
+        if (competition.status !== 'active') {
+            return res.status(400).json({ message: "Competition has not started yet.", code: 'NOT_STARTED' });
+        }
+
+        const startMs = competition.startedAt ? new Date(competition.startedAt).getTime() : null;
+        if (startMs && nowMs < startMs - EARLY_START_TOLERANCE_MS) {
+            return res.status(400).json({ message: "Competition has not started yet.", code: 'NOT_STARTED' });
+        }
+
+        const deadlineMs = getDeadlineMs(competition);
+        if (deadlineMs && nowMs > deadlineMs + SCORE_GRACE_MS) {
+            return res.status(400).json({ message: "Competition time has expired.", code: 'TIME_EXPIRED' });
         }
 
         const participant = competition.participants.find(p => participantMatches(p, activeID));
-
         if (!participant) {
-            return res.status(403).json({ message: "You are not a registered participant in this competition" });
+            return res.status(403).json({ message: "You are not a registered participant in this competition", code: 'NOT_PARTICIPANT' });
+        }
+
+        const currentState = (p) => ({
+            message: "success",
+            answers: p.answers || [],
+            score: p.score || 0,
+            totalAnswered: p.totalAnswered || 0,
+            wrongAnswers: p.wrongAnswers || 0,
+            finishedAt: p.finishedAt || null
+        });
+
+        // Once a student has submitted their final answers, nothing can change any
+        // more (otherwise someone could "finish" early to get a fast time and keep
+        // answering afterwards).
+        if (participant.finishedAt) {
+            return res.json({ ...currentState(participant), alreadyFinished: true });
         }
 
         // SECURE SCORING: grade every answer against the database. Scores sent by the
-        // client are ignored. Answers are merged by question so an out-of-order
-        // request carrying fewer answers can never erase newer ones.
+        // client are ignored. Answers are merged by question so a request carrying
+        // fewer answers can never erase newer ones.
         const questionMap = new Map(competition.questions.filter(Boolean).map(q => [String(q._id), q]));
         const mergedAnswers = new Map();
         (participant.answers || []).forEach(a => {
@@ -461,7 +738,7 @@ const updateLiveScore = async (req, res) => {
                 if (!questionMap.has(qId)) return;
                 const value = submittedAns.studentAnswer;
                 if (value === undefined || value === null || String(value).trim() === "") return;
-                mergedAnswers.set(qId, String(value));
+                mergedAnswers.set(qId, String(value).slice(0, 500));
             });
         }
 
@@ -483,45 +760,53 @@ const updateLiveScore = async (req, res) => {
             'participants.$.answers': secureAnswers
         };
 
-        let finishedAtValue = participant.finishedAt || null;
-        if (finished && !participant.finishedAt) {
-            let validatedFinishedAt = new Date(nowMs);
+        let finishedAtValue = null;
+        if (finished) {
+            // The finish time is the moment the student completed (sent by the client
+            // in SERVER time, see the frontend's clock-offset logic). It can't be in
+            // the future, before the start, after the deadline, or back-dated by more
+            // than a few seconds - so a wrong device clock or a tampered request
+            // can't win the time tie-breaker.
+            const upper = deadlineMs ? Math.min(nowMs, deadlineMs) : nowMs;
+            const lower = Math.max(startMs || 0, nowMs - FINISH_BACKDATE_LIMIT_MS);
+            let finishMsValue = nowMs;
             if (clientFinishedAt) {
-                const parsedDate = new Date(clientFinishedAt);
-                if (!isNaN(parsedDate.getTime()) && parsedDate.getTime() <= nowMs) {
-                    validatedFinishedAt = parsedDate;
-                }
+                const parsed = new Date(clientFinishedAt).getTime();
+                if (!isNaN(parsed)) finishMsValue = parsed;
             }
-            if (competition.startedAt) {
-                const startMs = new Date(competition.startedAt).getTime();
-                if (validatedFinishedAt.getTime() < startMs) {
-                    validatedFinishedAt = new Date(startMs);
-                }
-                if (competition.timer) {
-                    const maxFinishMs = startMs + (competition.timer * 1000);
-                    if (validatedFinishedAt.getTime() > maxFinishMs) {
-                        validatedFinishedAt = new Date(maxFinishMs);
-                    }
-                }
-            }
-            update['participants.$.finishedAt'] = validatedFinishedAt;
-            finishedAtValue = validatedFinishedAt;
+            finishMsValue = Math.min(Math.max(finishMsValue, lower), upper);
+            if (startMs) finishMsValue = Math.max(finishMsValue, startMs);
+            finishedAtValue = new Date(finishMsValue);
+            update['participants.$.finishedAt'] = finishedAtValue;
         }
 
-        // Positional update of this participant only: concurrent submissions from
-        // other students no longer overwrite each other (or throw VersionError).
+        // Positional update of this participant only (concurrent submissions from
+        // other students can't overwrite each other). The filter re-checks, atomically,
+        // that the battle is still running and this student hasn't finished.
         const result = await competitionModel.updateOne(
-            { _id: competitionId, 'participants._id': participant._id },
+            {
+                _id: competitionId,
+                status: 'active',
+                participants: { $elemMatch: { _id: participant._id, finishedAt: null } }
+            },
             { $set: update }
         );
+
         if (!result.matchedCount) {
-            return res.status(403).json({ message: "You are not a registered participant in this competition" });
+            const latest = await competitionModel.findById(competitionId).select('status participants');
+            if (!latest || latest.status === 'finished') {
+                return res.status(400).json({ message: "Competition has already ended.", code: 'COMPETITION_FINISHED' });
+            }
+            const latestMe = latest.participants.find(p => participantMatches(p, activeID));
+            if (!latestMe) {
+                return res.status(403).json({ message: "You are not a registered participant in this competition", code: 'NOT_PARTICIPANT' });
+            }
+            return res.json({ ...currentState(latestMe), alreadyFinished: !!latestMe.finishedAt });
         }
 
-        // Broadcast score update to the real-time scoreboard. The graded answers are
-        // deliberately NOT broadcast: the channel is public and would leak correct
-        // answers to other students (the teacher gets them from the details endpoint).
-        await safeTrigger(`competition-${competitionId}`, 'score-updated', {
+        // Live scoreboard for the host only. The graded answers are deliberately NOT
+        // broadcast: Pusher channels are public and that would leak correct answers.
+        await safeTrigger(hostChannel(competitionId), 'score-updated', {
             studentId: String(activeID),
             userName: activeName,
             score: secureScore,
@@ -544,34 +829,12 @@ const updateLiveScore = async (req, res) => {
     }
 };
 
-const rankParticipants = (participants) => [...participants].sort((a, b) => {
-    if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
-
-    const aFinished = !!a.finishedAt;
-    const bFinished = !!b.finishedAt;
-    if (aFinished && !bFinished) return -1;
-    if (!aFinished && bFinished) return 1;
-
-    if (aFinished && bFinished) {
-        const timeDiff = new Date(a.finishedAt) - new Date(b.finishedAt);
-        if (timeDiff !== 0) return timeDiff;
-    }
-
-    const aWrong = a.wrongAnswers || 0;
-    const bWrong = b.wrongAnswers || 0;
-    if (aWrong !== bWrong) return aWrong - bWrong;
-
-    const aTotal = Math.max(a.totalAnswered || 0, (a.answers && a.answers.length) || 0, (a.score || 0) + aWrong);
-    const bTotal = Math.max(b.totalAnswered || 0, (b.answers && b.answers.length) || 0, (b.score || 0) + bWrong);
-    return bTotal - aTotal;
-});
-
 // 7. Finish the competition (Teacher only or auto-ends on client timer)
 const finishCompetition = async (req, res) => {
     try {
         const teacherID = req.userData._id;
         const { competitionId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(competitionId)) {
+        if (!isValidId(competitionId)) {
             return res.status(404).json({ message: "Competition not found" });
         }
 
@@ -580,76 +843,14 @@ const finishCompetition = async (req, res) => {
             return res.status(404).json({ message: "Competition not found" });
         }
 
-        // Allow finishing if it is the host teacher
         if (String(existing.createdBy) !== String(teacherID)) {
             return res.status(403).json({ message: "Only the host teacher can force-end this competition" });
         }
 
-        const now = new Date();
-
-        // Atomic transition: only the first finish request (manual click, teacher
-        // timer, retry...) does the work, so podium coins are awarded exactly once.
-        const transitioned = await competitionModel.findOneAndUpdate(
-            { _id: competitionId, createdBy: teacherID, status: { $ne: 'finished' } },
-            { $set: { status: 'finished', endedAt: now } },
-            { new: true }
-        );
-
-        if (!transitioned) {
-            const alreadyFinished = await competitionModel.findById(competitionId);
-            return res.json({ message: "success", alreadyFinished: true, competition: alreadyFinished });
-        }
-
-        const maxFinishMs = transitioned.startedAt && transitioned.timer
-            ? new Date(transitioned.startedAt).getTime() + (transitioned.timer * 1000)
-            : now.getTime();
-        const cappedNow = new Date(Math.min(now.getTime(), maxFinishMs));
-
-        // Stamp / clamp finish times with array filters so in-flight score updates
-        // for individual participants are not overwritten.
-        await competitionModel.updateOne(
-            { _id: competitionId },
-            { $set: { 'participants.$[unfinished].finishedAt': cappedNow } },
-            { arrayFilters: [{ 'unfinished.finishedAt': null }] }
-        );
-        if (transitioned.startedAt && transitioned.timer) {
-            await competitionModel.updateOne(
-                { _id: competitionId },
-                { $set: { 'participants.$[late].finishedAt': new Date(maxFinishMs) } },
-                { arrayFilters: [{ 'late.finishedAt': { $gt: new Date(maxFinishMs) } }] }
-            );
-        }
-
+        const transitioned = await finalizeCompetition(competitionId, { teacherID });
         const competition = await competitionModel.findById(competitionId);
 
-        // Economy: Award coins to top 3 participants
-        try {
-            const sortedParticipants = rankParticipants(competition.participants || []);
-            const rewards = [50, 30, 10]; // 1st, 2nd, 3rd place rewards
-
-            for (let i = 0; i < Math.min(sortedParticipants.length, 3); i++) {
-                const participant = sortedParticipants[i];
-                if (participant.score > 0) {
-                    const studentId = participant.student || (participant.guestId && mongoose.Types.ObjectId.isValid(participant.guestId) ? participant.guestId : null);
-                    if (studentId) {
-                        await userModel.updateOne({ _id: studentId }, { $inc: { coins: rewards[i] } });
-                        console.log(`Awarded ${rewards[i]} coins to student ${studentId} for placing #${i + 1}`);
-                    }
-                }
-            }
-        } catch (err) {
-            console.error('Failed to award competition coins:', err);
-        }
-
-        // Broadcast ending event so clients transition to the podium/results screen.
-        // Keep the payload tiny (Pusher's limit is 10KB) - clients re-fetch details.
-        await safeTrigger(`competition-${competitionId}`, 'competition-finished', {
-            competitionId: String(competitionId),
-            status: 'finished',
-            endedAt: now
-        });
-
-        res.json({ message: "success", competition });
+        res.json({ message: "success", alreadyFinished: !transitioned, competition });
     } catch (error) {
         res.status(502).json({ message: error.message });
     }
@@ -706,17 +907,18 @@ const triggerMathRacerEvent = async (req, res) => {
     }
 };
 
+
 // 9. Kick/Remove a participant from the competition (Teacher host only)
 const removeParticipant = async (req, res) => {
     try {
         const teacherID = req.userData._id;
         const { competitionId } = req.params;
         const { participantId, studentId } = req.body;
-        if (!mongoose.Types.ObjectId.isValid(competitionId)) {
+        if (!isValidId(competitionId)) {
             return res.status(404).json({ message: "Competition not found" });
         }
 
-        const existing = await competitionModel.findById(competitionId).select('createdBy');
+        const existing = await competitionModel.findById(competitionId).select('createdBy status participants._id participants.student participants.guestId');
         if (!existing) {
             return res.status(404).json({ message: "Competition not found" });
         }
@@ -725,30 +927,40 @@ const removeParticipant = async (req, res) => {
             return res.status(403).json({ message: "Only the host teacher can remove participants" });
         }
 
+        if (existing.status === 'finished') {
+            return res.status(400).json({ message: "The competition has ended - results are final and can no longer be changed" });
+        }
+
         const targetId = String(participantId || studentId || '');
         if (!targetId) {
             return res.status(400).json({ message: "Participant target ID is required" });
         }
 
+        // The frontend may send the student id, the participant entry id or a guest id
+        const target = existing.participants.find(p => String(p._id) === targetId || participantMatches(p, targetId));
+        const targetStudentId = target && target.student ? String(target.student) : (isValidId(targetId) ? targetId : null);
+
         const pullConditions = [{ guestId: targetId }];
-        if (mongoose.Types.ObjectId.isValid(targetId)) {
+        if (isValidId(targetId)) {
             const oid = new mongoose.Types.ObjectId(targetId);
             pullConditions.push({ _id: oid }, { student: oid });
         }
+        if (target) pullConditions.push({ _id: target._id });
 
-        // Atomic $pull so a kick can't wipe out students joining at the same moment
-        await competitionModel.updateOne(
-            { _id: competitionId },
-            { $pull: { participants: { $or: pullConditions } } }
-        );
+        // Atomic $pull so a kick can't wipe out students joining at the same moment.
+        // The student is remembered so they can't simply re-join by themselves.
+        const update = { $pull: { participants: { $or: pullConditions } } };
+        if (targetStudentId) update.$addToSet = { removedStudents: new mongoose.Types.ObjectId(targetStudentId) };
+        await competitionModel.updateOne({ _id: competitionId }, update);
 
         // Return participants populated so the lobby keeps showing names, not IDs
         const competition = await competitionModel.findById(competitionId)
             .populate('participants.student', 'userName email');
 
         // Broadcast real-time kick event to update all client screens & kick the student
-        await safeTrigger(`competition-${competitionId}`, 'student-kicked', {
-            studentId: targetId
+        await safeTrigger(mainChannel(competitionId), 'student-kicked', {
+            studentId: targetStudentId || targetId,
+            participantId: target ? String(target._id) : null
         });
         console.log(`[KICK] Removed participant ${targetId} from competition ${competitionId}`);
 
@@ -762,10 +974,14 @@ module.exports = {
     createCompetition,
     getTeacherCompetitions,
     getCompetitionDetails,
+    getCompetitionStatus,
     joinCompetition,
     startCompetition,
     updateLiveScore,
     finishCompetition,
     removeParticipant,
-    triggerMathRacerEvent
+    triggerMathRacerEvent,
+    // exported for tests
+    rankParticipants,
+    isAnswerCorrect
 };

@@ -29,6 +29,12 @@ const competitionSchema = new mongoose.Schema({
     endedAt: {
         type: Date
     },
+    // Students the host kicked; they can't re-join by themselves (the host can still summon them)
+    removedStudents: {
+        type: [mongoose.Schema.Types.ObjectId],
+        ref: "user",
+        default: []
+    },
     participants: [
         {
             student: { 
@@ -55,6 +61,18 @@ const competitionSchema = new mongoose.Schema({
             },
             finishedAt: {
                 type: Date
+            },
+            joinedAt: {
+                type: Date
+            },
+            // Frozen when the competition is finalized so every screen,
+            // certificate and coin reward uses the exact same ranking
+            finalRank: {
+                type: Number
+            },
+            coinsAwarded: {
+                type: Number,
+                default: 0
             },
             answers: [
                 {
